@@ -72,7 +72,7 @@ When you first join a taskforce:
    - `$TF_ROOT/{{task-name}}/TASK.md`
 
 3. **Check existing chat:**
-   - `$TF_ROOT/{{task-name}}/chat-common.log`
+   - `$TF_ROOT/{{task-name}}/.chat.log`
    - See what names are taken, what's been discussed
 
 4. **Pick your name:**

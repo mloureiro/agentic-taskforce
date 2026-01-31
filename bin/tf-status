@@ -214,7 +214,7 @@ main() {
         error "Task '$task' does not exist.\nExpected directory: $task_dir"
     fi
 
-    local chat_log="$task_dir/chat.log"
+    local chat_log="$task_dir/.chat.log"
     local task_file="$task_dir/TASK.md"
     local now_epoch=$(date '+%s')
 

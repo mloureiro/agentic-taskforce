@@ -15,7 +15,7 @@ $TF_ROOT/
 │
 └── {{task-name}}/                    # Per-task folder
     ├── TASK.md                       # Mission briefing & requirements
-    ├── chat-common.log               # All agent communication (append-only)
+    ├── .chat.log                      # All agent communication (append-only)
     ├── findings-{{agent-name}}.md    # Personal findings (one per agent)
     └── ...                           # Other task-specific files
 ```
@@ -31,7 +31,7 @@ Choose a descriptive name, ideally including story number if available:
 
 ## Chat Log Format
 
-**File:** `chat-common.log`
+**File:** `.chat.log`
 **Access:** Append-only
 
 ### Entry Structure
