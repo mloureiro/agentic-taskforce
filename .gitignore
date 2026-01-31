@@ -6,5 +6,4 @@
 .nx/
 
 # Log files (runtime state)
-bin/.chat.log
-bin/.registration.log
+bin/*.log
