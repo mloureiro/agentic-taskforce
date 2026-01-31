@@ -3,7 +3,7 @@
 set -euo pipefail
 
 # tf-init - Initialize a new taskforce task
-# Creates task folder with TASK.md template and empty chat log
+# Creates task folder with TASK.md template, empty chat log, and git repo
 
 TASKFORCE_ROOT="$HOME/.claude-taskforce"
 
@@ -37,8 +37,9 @@ Examples:
 
 Created structure:
     ~/.claude-taskforce/<task-name>/
+    ├── .git/             # Git repository
     ├── TASK.md           # Mission briefing template
-    └── .chat.log   # Empty chat log
+    └── .chat.log         # Empty chat log (git-ignored)
 
 --check output:
     "unstarted" - Task exists but TASK.md is still the default template
@@ -161,12 +162,13 @@ CHAT_FILE="$TASK_DIR/.chat.log"
 # Track what we create for --ensure mode output
 CREATED_TASK_FILE=false
 CREATED_CHAT_FILE=false
+CREATED_GIT_REPO=false
 
 # Check if task already exists
 if [[ -d "$TASK_DIR" ]]; then
     if [[ "$ENSURE_MODE" == true ]]; then
         # In ensure mode, check what's missing and add it
-        if [[ -f "$TASK_FILE" && -f "$CHAT_FILE" ]]; then
+        if [[ -f "$TASK_FILE" && -f "$CHAT_FILE" && -d "$TASK_DIR/.git" ]]; then
             # Everything exists, output status and exit
             echo "exists"
             exit 0
@@ -255,6 +257,32 @@ else
 EOF
 fi
 
+# Initialize git repository (only if .git doesn't exist)
+if [[ -d "$TASK_DIR/.git" ]]; then
+    if [[ "$ENSURE_MODE" != true ]]; then
+        warn "Git repository already exists, skipping"
+    fi
+else
+    CREATED_GIT_REPO=true
+
+    # Create .gitignore
+    cat > "$TASK_DIR/.gitignore" <<EOF
+# Chat log (runtime state, managed by tf-chat)
+.chat.log
+
+# Agent findings are tracked per-agent
+# findings-*.md
+EOF
+
+    # Initialize git and make initial commit
+    (
+        cd "$TASK_DIR"
+        git init --quiet
+        git add TASK.md .gitignore
+        git commit --quiet -m "Initialize taskforce: $TASK_NAME"
+    )
+fi
+
 # Output based on mode
 if [[ "$ENSURE_MODE" == true ]]; then
     # Machine-readable output for tf-claude
@@ -270,9 +298,11 @@ else
     echo ""
     echo "Location: $TASK_DIR"
     echo ""
-    echo "Created files:"
+    echo "Created:"
+    echo "  - .git/             (git repository initialized)"
     echo "  - TASK.md           (edit this with your mission briefing)"
-    echo "  - .chat.log   (agents will communicate here)"
+    echo "  - .chat.log         (agents will communicate here, git-ignored)"
+    echo "  - .gitignore        (ignores runtime files)"
     echo ""
     info "Next steps:"
     echo "  1. Edit $TASK_DIR/TASK.md with your task details"
