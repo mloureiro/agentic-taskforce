@@ -7,7 +7,7 @@ This document defines file formats, naming conventions, and communication struct
 ## Directory Structure
 
 ```
-~/.claude-taskforce/
+$TF_ROOT/
 ├── RULES.md                          # Core directives (this repo)
 ├── FORMAT.md                         # This file
 ├── PATTERNS.md                       # Taskforce patterns

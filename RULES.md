@@ -73,10 +73,10 @@ Example: `user/fix-flaky-ci/red`
 
 | Scope                                                 | Permission      | Examples                          |
 | ----------------------------------------------------- | --------------- | --------------------------------- |
-| `~/.claude-taskforce/*`                               | READ            | `RULES.md`, `FORMAT.md`, etc.     |
-| `~/.claude-taskforce/{{task-name}}/*`                 | READ            | `TASK.md`, other agents' findings |
-| `~/.claude-taskforce/{{task-name}}/.chat.log`          | **tf-chat ONLY** | See warning below                 |
-| `~/.claude-taskforce/{{task-name}}/*-{{your-name}}.*` | FULL WRITE      | `findings-red.md`                 |
+| `$TF_ROOT/*`                               | READ            | `RULES.md`, `FORMAT.md`, etc.     |
+| `$TF_ROOT/{{task-name}}/*`                 | READ            | `TASK.md`, other agents' findings |
+| `$TF_ROOT/{{task-name}}/.chat.log`          | **tf-chat ONLY** | See warning below                 |
+| `$TF_ROOT/{{task-name}}/*-{{your-name}}.*` | FULL WRITE      | `findings-red.md`                 |
 
 ### ⛔ CHAT FILE WARNING
 
@@ -251,7 +251,7 @@ To escalate: Post `ESCALATE` message type in chat and wait in your session.
 
 ## Helper CLI Tools
 
-The following CLI tools are available in `~/.claude-taskforce/bin/` (should be in PATH).
+The following CLI tools are available in `$TF_ROOT/bin/` (should be in PATH).
 
 **Use these tools.** They handle formatting, timestamps, backoff tracking, and state management automatically. Manual file operations are error-prone - the tools exist to prevent mistakes.
 

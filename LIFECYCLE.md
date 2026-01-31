@@ -63,16 +63,16 @@ This document describes agent states, polling protocols, and completion flow.
 When you first join a taskforce:
 
 1. **Read the docs:**
-   - `~/.claude-taskforce/RULES.md`
-   - `~/.claude-taskforce/FORMAT.md`
-   - `~/.claude-taskforce/PATTERNS.md`
-   - `~/.claude-taskforce/LIFECYCLE.md` (this file)
+   - `$TF_ROOT/RULES.md`
+   - `$TF_ROOT/FORMAT.md`
+   - `$TF_ROOT/PATTERNS.md`
+   - `$TF_ROOT/LIFECYCLE.md` (this file)
 
 2. **Read the task:**
-   - `~/.claude-taskforce/{{task-name}}/TASK.md`
+   - `$TF_ROOT/{{task-name}}/TASK.md`
 
 3. **Check existing chat:**
-   - `~/.claude-taskforce/{{task-name}}/chat-common.log`
+   - `$TF_ROOT/{{task-name}}/chat-common.log`
    - See what names are taken, what's been discussed
 
 4. **Pick your name:**
@@ -98,7 +98,7 @@ When you first join a taskforce:
    ```
 
 8. **Create your findings file:**
-   - `~/.claude-taskforce/{{task-name}}/findings-{{name}}.md`
+   - `$TF_ROOT/{{task-name}}/findings-{{name}}.md`
 
 9. **Begin work**
 
