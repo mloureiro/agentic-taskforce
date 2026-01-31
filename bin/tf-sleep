@@ -270,8 +270,9 @@ poll_for_messages() {
             return 1
         fi
 
-        # Check if there are unread messages
-        if echo "$status_output" | grep -q "unread message"; then
+        # Check if there are unread messages (look for "N unread message" where N is a number > 0)
+        # Exclude "No unread messages" which also contains "unread message"
+        if echo "$status_output" | grep -qE "[0-9]+ unread message"; then
             echo -e "${GREEN}[tf-sleep]${NC} Messages found!"
             echo "$status_output"
             return 0
