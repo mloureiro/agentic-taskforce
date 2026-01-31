@@ -5,7 +5,7 @@ set -euo pipefail
 # tf-claude - Spawn a Claude Code session with taskforce identity
 # Sets TF_SESSION_ID env var for session tracking and optionally registers for a task
 
-TASKFORCE_ROOT="$HOME/.claude-taskforce"
+TASKFORCE_ROOT="${TF_ROOT:-$HOME/.agentic-taskforce}"
 
 # Colors
 RED='\033[0;31m'

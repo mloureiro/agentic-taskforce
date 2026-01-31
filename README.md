@@ -1,6 +1,6 @@
-# Claude Taskforce
+# Agentic Taskforce
 
-A framework for coordinating multiple Claude Code agent instances working together on the same task.
+A framework for coordinating multiple AI agent instances working together on the same task.
 
 ## What is this?
 
@@ -27,23 +27,23 @@ Instead of one agent trying approaches sequentially, multiple agents can divide 
 ## How it works
 
 ```
-~/.claude-taskforce/
-├── RULES.md              # Core directives for agents
-├── FORMAT.md             # File formats and conventions
-├── PATTERNS.md           # Coordination patterns
-├── LIFECYCLE.md          # Agent states and protocols
-├── bin/                  # CLI tools
-│   ├── tf-claude         # Spawn agent sessions
-│   ├── tf-init           # Create new tasks
-│   ├── tf-register       # Agent registration
-│   ├── tf-chat           # Chat log operations
-│   ├── tf-sleep          # Smart exponential backoff
-│   └── tf-status         # Dashboard view
+~/.agentic-taskforce/          # Default, configurable via TF_ROOT
+├── RULES.md                   # Core directives for agents
+├── FORMAT.md                  # File formats and conventions
+├── PATTERNS.md                # Coordination patterns
+├── LIFECYCLE.md               # Agent states and protocols
+├── bin/                       # CLI tools
+│   ├── tf-claude              # Spawn agent sessions
+│   ├── tf-init                # Create new tasks
+│   ├── tf-register            # Agent registration
+│   ├── tf-chat                # Chat log operations
+│   ├── tf-sleep               # Smart exponential backoff
+│   └── tf-status              # Dashboard view
 │
-└── <task-name>/          # Per-task folder (separate git repo)
-    ├── TASK.md           # Mission briefing
-    ├── .chat.log         # Agent communication
-    └── findings-*.md     # Per-agent findings
+└── <task-name>/               # Per-task folder (separate git repo)
+    ├── TASK.md                # Mission briefing
+    ├── .chat.log              # Agent communication
+    └── findings-*.md          # Per-agent findings
 ```
 
 Each agent:
@@ -60,8 +60,10 @@ Each agent:
 
 ```bash
 # Add to your shell profile (~/.zshrc or ~/.bashrc)
-export PATH="$HOME/.claude-taskforce/bin:$PATH"
+export TF_ROOT="/path/to/clone/location"
+export PATH="$TF_ROOT/bin:$PATH"
 export TF_BRANCH_PREFIX="your-username"
+
 ```
 
 ### Create a task

@@ -5,7 +5,7 @@ set -euo pipefail
 # tf-sleep - Smart sleep with automatic exponential backoff
 # Tracks sleep history and auto-escalates/resets based on call timing
 
-TASKFORCE_ROOT="$HOME/.claude-taskforce"
+TASKFORCE_ROOT="${TF_ROOT:-$HOME/.agentic-taskforce}"
 REGISTRY_FILE="$TASKFORCE_ROOT/bin/.registration.log"
 SLEEP_LOG="$TASKFORCE_ROOT/bin/.sleep.log"
 

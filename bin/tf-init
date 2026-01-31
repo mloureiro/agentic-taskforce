@@ -5,7 +5,7 @@ set -euo pipefail
 # tf-init - Initialize a new taskforce task
 # Creates task folder with TASK.md template, empty chat log, and git repo
 
-TASKFORCE_ROOT="$HOME/.claude-taskforce"
+TASKFORCE_ROOT="${TF_ROOT:-$HOME/.agentic-taskforce}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -36,7 +36,7 @@ Examples:
     tf-init --check my-task           # Check task status
 
 Created structure:
-    ~/.claude-taskforce/<task-name>/
+    \$TF_ROOT/<task-name>/     (default: ~/.agentic-taskforce)
     ├── .git/             # Git repository
     ├── TASK.md           # Mission briefing template
     └── .chat.log         # Empty chat log (git-ignored)

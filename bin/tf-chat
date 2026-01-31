@@ -5,7 +5,7 @@ set -euo pipefail
 # tf-chat - Taskforce chat log utilities
 # Subcommands: add, unread, search
 
-TASKFORCE_ROOT="$HOME/.claude-taskforce"
+TASKFORCE_ROOT="${TF_ROOT:-$HOME/.agentic-taskforce}"
 REGISTRY_FILE="$TASKFORCE_ROOT/bin/.registration.log"
 CHAT_STATE_LOG="$TASKFORCE_ROOT/bin/.chat.log"
 VALID_TYPES=("JOIN" "PROGRESS" "QUESTION" "ANSWER" "FINDING" "DECISION" "BLOCKER" "WAITING" "DONE" "ESCALATE")
