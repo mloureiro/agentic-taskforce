@@ -130,6 +130,7 @@ if [[ -z "$TASK_ID" ]]; then
         "--allowedTools" "Bash(git checkout *)"
         "--allowedTools" "Bash(git add *)"
         "--allowedTools" "Bash(git commit *)"
+        "--allowedTools" "Bash(git push *)"
 
         # Common utilities
         "--allowedTools" "Bash(ls *)"
@@ -222,11 +223,7 @@ ALLOWED_TOOLS=(
 
     # Taskforce file access
     "--allowedTools" "Read($TASKFORCE_ROOT/**)"
-    "--allowedTools" "Edit($TASK_DIR/**)"
-
-    # Deny chat log editing (must use tf-chat commands instead)
-    "--disallowedTools" "Edit($TASK_DIR/chat-common.log)"
-    "--disallowedTools" "Edit($TASK_DIR/.chat.log)"
+    "--allowedTools" "Edit($TASK_DIR/*-$AGENT_NAME.*)"
 
     # Git operations
     "--allowedTools" "Bash(git diff *)"
@@ -237,6 +234,7 @@ ALLOWED_TOOLS=(
     "--allowedTools" "Bash(git checkout *)"
     "--allowedTools" "Bash(git add *)"
     "--allowedTools" "Bash(git commit *)"
+    "--allowedTools" "Bash(git push *)"
 
     # Common utilities
     "--allowedTools" "Bash(ls *)"
