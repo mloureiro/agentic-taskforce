@@ -5,7 +5,13 @@ set -euo pipefail
 # tf-claude - Spawn a Claude Code session with taskforce identity
 # Sets TF_SESSION_ID env var for session tracking and optionally registers for a task
 
-TASKFORCE_ROOT="${TF_ROOT:-$HOME/.agentic-taskforce}"
+# Calculate taskforce root from script location (parent of bin/)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+TASKFORCE_ROOT="$(dirname "$SCRIPT_DIR")"
+
+# Create absolute path format for Claude Code permissions
+# Claude Code requires // prefix for absolute paths (see github.com/anthropics/claude-code/issues/16800)
+TASKFORCE_ROOT_ABS="//${TASKFORCE_ROOT#/}"
 
 # Colors
 RED='\033[0;31m'
@@ -119,7 +125,7 @@ if [[ -z "$TASK_ID" ]]; then
         "--allowed-tools" "Bash(tf-status *)"
 
         # Taskforce file access (read-only, no task dir yet)
-        "--allowed-tools" "Read($TASKFORCE_ROOT/**)"
+        "--allowed-tools" "Read($TASKFORCE_ROOT_ABS/**)"
 
         # Git operations
         "--allowed-tools" "Bash(git diff *)"
@@ -156,6 +162,7 @@ fi
 
 # Task-id provided - full initialization flow
 TASK_DIR="$TASKFORCE_ROOT/$TASK_ID"
+TASK_DIR_ABS="//${TASK_DIR#/}"
 TASK_FILE="$TASK_DIR/TASK.md"
 
 verbose "${GREEN}Taskforce session initialized${NC}"
@@ -222,8 +229,8 @@ ALLOWED_TOOLS=(
     "--allowed-tools" "Bash(tf-status *)"
 
     # Taskforce file access
-    "--allowed-tools" "Read($TASKFORCE_ROOT/**)"
-    "--allowed-tools" "Edit($TASK_DIR/*-$AGENT_NAME.*)"
+    "--allowed-tools" "Read($TASKFORCE_ROOT_ABS/**)"
+    "--allowed-tools" "Edit($TASK_DIR_ABS/*-$AGENT_NAME.*)"
 
     # Git operations
     "--allowed-tools" "Bash(git diff *)"
@@ -259,11 +266,11 @@ ALLOWED_TOOLS=(
 if [[ "$TASK_NEWLY_CREATED" == true ]]; then
     PROMPT="You have been picked to be part of a taskforce, read about what is a taskforce in @$TASKFORCE_ROOT/RULES.md.
 You have been registered already, check \`tf-register status\`.
-Let's discuss the task at hand at $TASK_DIR/TASK.md"
+Let's discuss the task at hand at @$TASK_DIR/TASK.md"
 else
     PROMPT="You have been picked to be part of a taskforce, read about what is a taskforce in @$TASKFORCE_ROOT/RULES.md.
 You have been registered already, check \`tf-register status\`.
-Your task is at $TASK_DIR/TASK.md"
+Your task is at @$TASK_DIR/TASK.md"
 fi
 
 exec claude "${ALLOWED_TOOLS[@]}" -- "$PROMPT" ${CLAUDE_ARGS[@]+"${CLAUDE_ARGS[@]}"}
