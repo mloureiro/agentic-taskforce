@@ -112,43 +112,43 @@ if [[ -z "$TASK_ID" ]]; then
     # Base allowed tools (no task-specific permissions yet)
     BASE_ALLOWED_TOOLS=(
         # Taskforce tools
-        "--allowedTools" "Bash(tf-*)"
-        "--allowedTools" "Bash(tf-chat *)"
-        "--allowedTools" "Bash(tf-register *)"
-        "--allowedTools" "Bash(tf-sleep *)"
-        "--allowedTools" "Bash(tf-status *)"
+        "--allowed-tools" "Bash(tf-*)"
+        "--allowed-tools" "Bash(tf-chat *)"
+        "--allowed-tools" "Bash(tf-register *)"
+        "--allowed-tools" "Bash(tf-sleep *)"
+        "--allowed-tools" "Bash(tf-status *)"
 
         # Taskforce file access (read-only, no task dir yet)
-        "--allowedTools" "Read($TASKFORCE_ROOT/**)"
+        "--allowed-tools" "Read($TASKFORCE_ROOT/**)"
 
         # Git operations
-        "--allowedTools" "Bash(git diff *)"
-        "--allowedTools" "Bash(git status)"
-        "--allowedTools" "Bash(git log *)"
-        "--allowedTools" "Bash(git show *)"
-        "--allowedTools" "Bash(git branch *)"
-        "--allowedTools" "Bash(git checkout *)"
-        "--allowedTools" "Bash(git add *)"
-        "--allowedTools" "Bash(git commit *)"
-        "--allowedTools" "Bash(git push *)"
+        "--allowed-tools" "Bash(git diff *)"
+        "--allowed-tools" "Bash(git status)"
+        "--allowed-tools" "Bash(git log *)"
+        "--allowed-tools" "Bash(git show *)"
+        "--allowed-tools" "Bash(git branch *)"
+        "--allowed-tools" "Bash(git checkout *)"
+        "--allowed-tools" "Bash(git add *)"
+        "--allowed-tools" "Bash(git commit *)"
+        "--allowed-tools" "Bash(git push *)"
 
         # Common utilities
-        "--allowedTools" "Bash(ls *)"
-        "--allowedTools" "Bash(cat *)"
-        "--allowedTools" "Bash(grep *)"
-        "--allowedTools" "Bash(find *)"
-        "--allowedTools" "Bash(echo *)"
-        "--allowedTools" "Bash(sleep *)"
-        "--allowedTools" "Bash(pwd)"
+        "--allowed-tools" "Bash(ls *)"
+        "--allowed-tools" "Bash(cat *)"
+        "--allowed-tools" "Bash(grep *)"
+        "--allowed-tools" "Bash(find *)"
+        "--allowed-tools" "Bash(echo *)"
+        "--allowed-tools" "Bash(sleep *)"
+        "--allowed-tools" "Bash(pwd)"
 
         # Build tools
-        "--allowedTools" "Bash(pnpm *)"
-        "--allowedTools" "Bash(npm run *)"
-        "--allowedTools" "Bash(npx *)"
+        "--allowed-tools" "Bash(pnpm *)"
+        "--allowed-tools" "Bash(npm run *)"
+        "--allowed-tools" "Bash(npx *)"
 
         # Project file access (current directory)
-        "--allowedTools" "Read($PWD/**)"
-        "--allowedTools" "Edit($PWD/**)"
+        "--allowed-tools" "Read($PWD/**)"
+        "--allowed-tools" "Edit($PWD/**)"
     )
 
     exec claude "${BASE_ALLOWED_TOOLS[@]}" ${CLAUDE_ARGS[@]+"${CLAUDE_ARGS[@]}"}
@@ -215,44 +215,44 @@ echo ""
 # Step 4: Build allowed tools for autonomous operation
 ALLOWED_TOOLS=(
     # Taskforce tools
-    "--allowedTools" "Bash(tf-*)"
-    "--allowedTools" "Bash(tf-chat *)"
-    "--allowedTools" "Bash(tf-register *)"
-    "--allowedTools" "Bash(tf-sleep *)"
-    "--allowedTools" "Bash(tf-status *)"
+    "--allowed-tools" "Bash(tf-*)"
+    "--allowed-tools" "Bash(tf-chat *)"
+    "--allowed-tools" "Bash(tf-register *)"
+    "--allowed-tools" "Bash(tf-sleep *)"
+    "--allowed-tools" "Bash(tf-status *)"
 
     # Taskforce file access
-    "--allowedTools" "Read($TASKFORCE_ROOT/**)"
-    "--allowedTools" "Edit($TASK_DIR/*-$AGENT_NAME.*)"
+    "--allowed-tools" "Read($TASKFORCE_ROOT/**)"
+    "--allowed-tools" "Edit($TASK_DIR/*-$AGENT_NAME.*)"
 
     # Git operations
-    "--allowedTools" "Bash(git diff *)"
-    "--allowedTools" "Bash(git status)"
-    "--allowedTools" "Bash(git log *)"
-    "--allowedTools" "Bash(git show *)"
-    "--allowedTools" "Bash(git branch *)"
-    "--allowedTools" "Bash(git checkout *)"
-    "--allowedTools" "Bash(git add *)"
-    "--allowedTools" "Bash(git commit *)"
-    "--allowedTools" "Bash(git push *)"
+    "--allowed-tools" "Bash(git diff *)"
+    "--allowed-tools" "Bash(git status)"
+    "--allowed-tools" "Bash(git log *)"
+    "--allowed-tools" "Bash(git show *)"
+    "--allowed-tools" "Bash(git branch *)"
+    "--allowed-tools" "Bash(git checkout *)"
+    "--allowed-tools" "Bash(git add *)"
+    "--allowed-tools" "Bash(git commit *)"
+    "--allowed-tools" "Bash(git push *)"
 
     # Common utilities
-    "--allowedTools" "Bash(ls *)"
-    "--allowedTools" "Bash(cat *)"
-    "--allowedTools" "Bash(grep *)"
-    "--allowedTools" "Bash(find *)"
-    "--allowedTools" "Bash(echo *)"
-    "--allowedTools" "Bash(sleep *)"
-    "--allowedTools" "Bash(pwd)"
+    "--allowed-tools" "Bash(ls *)"
+    "--allowed-tools" "Bash(cat *)"
+    "--allowed-tools" "Bash(grep *)"
+    "--allowed-tools" "Bash(find *)"
+    "--allowed-tools" "Bash(echo *)"
+    "--allowed-tools" "Bash(sleep *)"
+    "--allowed-tools" "Bash(pwd)"
 
     # Build tools
-    "--allowedTools" "Bash(pnpm *)"
-    "--allowedTools" "Bash(npm run *)"
-    "--allowedTools" "Bash(npx *)"
+    "--allowed-tools" "Bash(pnpm *)"
+    "--allowed-tools" "Bash(npm run *)"
+    "--allowed-tools" "Bash(npx *)"
 
     # Project file access (current directory)
-    "--allowedTools" "Read($PWD/**)"
-    "--allowedTools" "Edit($PWD/**)"
+    "--allowed-tools" "Read($PWD/**)"
+    "--allowed-tools" "Edit($PWD/**)"
 )
 
 # Step 5: Build prompt and spawn claude (auto-executes)
@@ -266,4 +266,4 @@ You have been registered already, check \`tf-register status\`.
 Your task is at $TASK_DIR/TASK.md"
 fi
 
-exec claude "${ALLOWED_TOOLS[@]}" "$PROMPT" ${CLAUDE_ARGS[@]+"${CLAUDE_ARGS[@]}"}
+exec claude "${ALLOWED_TOOLS[@]}" -- "$PROMPT" ${CLAUDE_ARGS[@]+"${CLAUDE_ARGS[@]}"}
