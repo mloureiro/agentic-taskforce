@@ -281,7 +281,7 @@ validate_type() {
 
 validate_agent() {
     local agent="$1"
-    local valid_agents=("red" "blue" "yellow" "green" "pink" "purple" "orange" "cyan")
+    local valid_agents=("red" "blue" "yellow" "green" "pink" "purple" "orange" "cyan" "gray" "teal" "indigo" "maroon" "crimson" "lime" "khaki")
     for valid in "${valid_agents[@]}"; do
         if [[ "$agent" == "$valid" ]]; then
             return 0

@@ -7,7 +7,7 @@ set -euo pipefail
 
 TASKFORCE_ROOT="$HOME/.claude-taskforce"
 REGISTRY_FILE="$TASKFORCE_ROOT/bin/.registration.log"
-VALID_AGENTS=("red" "blue" "yellow" "green" "pink" "purple" "orange" "cyan")
+VALID_AGENTS=("red" "blue" "yellow" "green" "pink" "purple" "orange" "cyan" "gray" "teal" "indigo" "maroon" "crimson" "lime" "khaki")
 
 # Colors
 RED='\033[0;31m'
