@@ -1,0 +1,282 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# tf-init - Initialize a new taskforce task
+# Creates task folder with TASK.md template and empty chat log
+
+TASKFORCE_ROOT="$HOME/.claude-taskforce"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+usage() {
+    cat <<EOF
+Usage: tf-init --name <task-name> [--description <description>] [--ensure]
+       tf-init --check <task-name>
+
+Initialize a new taskforce task folder or check task status.
+
+Options:
+    --name, -n        Task name (required for init, used as folder name)
+    --description, -d Task description (optional)
+    --ensure          Create if missing, skip if exists (idempotent)
+    --check           Check if task exists and whether it's started or unstarted
+    --help, -h        Show this help message
+
+Examples:
+    tf-init --name fix-flaky-ci
+    tf-init --name sc-12345-new-feature --description "Implement the new export feature"
+    tf-init -n fix-deadlock -d "Fix database deadlock in parallel runs"
+    tf-init --ensure --name my-task   # Safe to run multiple times
+    tf-init --check my-task           # Check task status
+
+Created structure:
+    ~/.claude-taskforce/<task-name>/
+    ├── TASK.md           # Mission briefing template
+    └── .chat.log   # Empty chat log
+
+--check output:
+    "unstarted" - Task exists but TASK.md is still the default template
+    "started"   - Task exists and TASK.md has been modified
+    Exit code 1 if task doesn't exist
+
+EOF
+}
+
+error() {
+    echo -e "${RED}Error:${NC} $1" >&2
+    exit 1
+}
+
+success() {
+    echo -e "${GREEN}$1${NC}"
+}
+
+info() {
+    echo -e "${BLUE}$1${NC}"
+}
+
+warn() {
+    echo -e "${YELLOW}$1${NC}"
+}
+
+# Template marker used to detect unstarted tasks
+UNSTARTED_MARKER="<!-- TODO: Add task objective here -->"
+
+# Check if a task is unstarted (TASK.md still has default template)
+# Returns: 0 if unstarted, 1 if started
+is_task_unstarted() {
+    local task_file="$1"
+    [[ ! -f "$task_file" ]] && return 1
+    grep -q "$UNSTARTED_MARKER" "$task_file"
+}
+
+# Command: --check <task-name>
+# Outputs "unstarted" or "started", exits 1 if task doesn't exist
+cmd_check() {
+    local task_name="$1"
+    local task_dir="$TASKFORCE_ROOT/$task_name"
+    local task_file="$task_dir/TASK.md"
+
+    if [[ ! -d "$task_dir" ]]; then
+        error "Task '$task_name' does not exist."
+    fi
+
+    if [[ ! -f "$task_file" ]]; then
+        # No TASK.md means unstarted (or corrupted)
+        echo "unstarted"
+        return 0
+    fi
+
+    if is_task_unstarted "$task_file"; then
+        echo "unstarted"
+    else
+        echo "started"
+    fi
+}
+
+# Parse arguments
+TASK_NAME=""
+DESCRIPTION=""
+ENSURE_MODE=false
+CHECK_MODE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --name|-n)
+            TASK_NAME="$2"
+            shift 2
+            ;;
+        --description|-d)
+            DESCRIPTION="$2"
+            shift 2
+            ;;
+        --ensure)
+            ENSURE_MODE=true
+            shift
+            ;;
+        --check)
+            CHECK_MODE=true
+            TASK_NAME="$2"
+            shift 2
+            ;;
+        --help|-h)
+            usage
+            exit 0
+            ;;
+        *)
+            error "Unknown option: $1\nUse --help for usage information."
+            ;;
+    esac
+done
+
+# Handle --check mode
+if [[ "$CHECK_MODE" == true ]]; then
+    if [[ -z "$TASK_NAME" ]]; then
+        error "Task name is required for --check.\nUsage: tf-init --check <task-name>"
+    fi
+    cmd_check "$TASK_NAME"
+    exit 0
+fi
+
+# Validate required arguments
+if [[ -z "$TASK_NAME" ]]; then
+    error "Task name is required.\nUsage: tf-init --name <task-name>"
+fi
+
+# Validate task name (no spaces, special chars)
+if [[ ! "$TASK_NAME" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+    error "Task name must only contain letters, numbers, hyphens, and underscores."
+fi
+
+TASK_DIR="$TASKFORCE_ROOT/$TASK_NAME"
+TASK_FILE="$TASK_DIR/TASK.md"
+CHAT_FILE="$TASK_DIR/.chat.log"
+
+# Track what we create for --ensure mode output
+CREATED_TASK_FILE=false
+CREATED_CHAT_FILE=false
+
+# Check if task already exists
+if [[ -d "$TASK_DIR" ]]; then
+    if [[ "$ENSURE_MODE" == true ]]; then
+        # In ensure mode, check what's missing and add it
+        if [[ -f "$TASK_FILE" && -f "$CHAT_FILE" ]]; then
+            # Everything exists, output status and exit
+            echo "exists"
+            exit 0
+        fi
+        # Continue to add missing files
+    else
+        error "Task '$TASK_NAME' already exists at: $TASK_DIR"
+    fi
+fi
+
+# Create task directory
+if [[ "$ENSURE_MODE" == true ]]; then
+    mkdir -p "$TASK_DIR"
+else
+    info "Creating task: $TASK_NAME"
+    mkdir -p "$TASK_DIR"
+fi
+
+# Set description placeholder if not provided
+if [[ -z "$DESCRIPTION" ]]; then
+    DESCRIPTION="<!-- TODO: Add task objective here -->"
+fi
+
+# Create TASK.md (only if it doesn't exist)
+if [[ -f "$TASK_FILE" ]]; then
+    if [[ "$ENSURE_MODE" != true ]]; then
+        warn "TASK.md already exists, skipping"
+    fi
+else
+    CREATED_TASK_FILE=true
+    cat > "$TASK_FILE" <<EOF
+# Task: $TASK_NAME
+
+## Objective
+
+$DESCRIPTION
+
+## Requirements Checklist
+
+- [ ] <!-- Requirement 1 -->
+- [ ] <!-- Requirement 2 -->
+- [ ] <!-- Requirement 3 -->
+
+## Context
+
+<!-- Background information, links to issues, relevant history -->
+
+## Relevant Files
+
+<!--
+- \`path/to/file.ts\` - why it's relevant
+- \`another/file.ts\` - description
+-->
+
+## Constraints
+
+<!-- Any limitations or requirements -->
+
+## Success Criteria
+
+<!-- How we know the task is complete -->
+
+## Notes
+
+<!-- Any additional information -->
+EOF
+fi
+
+# Create empty chat log with header (only if it doesn't exist)
+if [[ -f "$CHAT_FILE" ]]; then
+    if [[ "$ENSURE_MODE" != true ]]; then
+        warn ".chat.log already exists, skipping"
+    fi
+else
+    CREATED_CHAT_FILE=true
+    cat > "$CHAT_FILE" <<EOF
+# Taskforce Chat Log: $TASK_NAME
+# Created: $(date '+%Y-%m-%d %H:%M:%S')
+#
+# Format: ### [YYYY-MM-DD HH:MM:SS] agent-name | TYPE
+# Types: JOIN, PROGRESS, QUESTION, ANSWER, FINDING, DECISION, BLOCKER, WAITING, DONE, ESCALATE
+#
+# Rules: APPEND ONLY - Do not edit or delete entries
+# ─────────────────────────────────────────────────────────────────────────────
+
+EOF
+fi
+
+# Output based on mode
+if [[ "$ENSURE_MODE" == true ]]; then
+    # Machine-readable output for tf-claude
+    if [[ "$CREATED_TASK_FILE" == true ]]; then
+        echo "created"
+    else
+        echo "exists"
+    fi
+else
+    # Human-readable output
+    echo ""
+    success "Taskforce task initialized!"
+    echo ""
+    echo "Location: $TASK_DIR"
+    echo ""
+    echo "Created files:"
+    echo "  - TASK.md           (edit this with your mission briefing)"
+    echo "  - .chat.log   (agents will communicate here)"
+    echo ""
+    info "Next steps:"
+    echo "  1. Edit $TASK_DIR/TASK.md with your task details"
+    echo "  2. Spawn agents and point them to this task"
+    echo "  3. Agents should read the task and post JOIN to .chat.log"
+    echo ""
+fi

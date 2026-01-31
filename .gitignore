@@ -1,0 +1,10 @@
+# Task directories (separate projects)
+/*/
+!/bin/
+
+# Nx cache
+.nx/
+
+# Log files (runtime state)
+bin/.chat.log
+bin/.registration.log

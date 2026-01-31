@@ -1,0 +1,452 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# tf-sleep - Smart sleep with automatic exponential backoff
+# Tracks sleep history and auto-escalates/resets based on call timing
+
+TASKFORCE_ROOT="$HOME/.claude-taskforce"
+REGISTRY_FILE="$TASKFORCE_ROOT/bin/.registration.log"
+SLEEP_LOG="$TASKFORCE_ROOT/bin/.sleep.log"
+
+# Sleep stages in seconds
+SLEEP_STAGES=(5 10 30 60 90 120 180)
+
+# Escalation windows (if called within last_sleep + window, escalate)
+WINDOW_SHORT=10   # For stages <= 60s
+WINDOW_LONG=30    # For stages >= 90s
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+usage() {
+    cat <<EOF
+Usage: tf-sleep [options]
+
+Smart sleep with automatic exponential backoff.
+
+Options:
+    --continue, -c           Escalate to next backoff stage (if recent sleep)
+    --from <seconds>         Sleep specified time, continue from closest stage
+    --until-new-messages, -u Poll for new chat messages instead of sleeping
+    --max <seconds>          Max wait time for --until-new-messages (default: 600)
+    --dry-run, -d            Show what would happen without sleeping
+    --help, -h               Show this help message
+
+Backoff stages: 5s → 10s → 30s → 60s → 90s → 120s → 180s (max)
+
+Default behavior:
+    - Always starts at stage 0 (5s)
+
+With --continue:
+    - If called quickly after last sleep → escalates to next stage
+    - If called after a gap → stays at stage 0 (activity likely happened)
+
+    Escalation windows:
+    - Stages ≤60s: escalate if called within (last_sleep + 10s)
+    - Stages ≥90s: escalate if called within (last_sleep + 30s)
+
+Message polling (--until-new-messages):
+    - Checks for unread messages every 5 seconds
+    - Exits immediately when messages are found
+    - Times out after --max seconds (default: 10 minutes)
+
+Identity: Automatically detected from your registration (tf-register).
+
+Examples:
+    tf-sleep              # Sleep 5s (stage 0)
+    tf-sleep --continue   # Escalate if recently slept, otherwise 5s
+    tf-sleep --from 60    # Sleep 60s, continue from that stage
+    tf-sleep --dry-run    # Preview without sleeping
+    tf-sleep -u           # Wait for new messages (max 10 min)
+    tf-sleep -u --max 120 # Wait for new messages (max 2 min)
+
+EOF
+}
+
+error() {
+    echo -e "${RED}Error:${NC} $1" >&2
+    exit 1
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# REGISTRATION HELPERS
+# ─────────────────────────────────────────────────────────────────────────────
+
+get_session_registration() {
+    local session_id="${TF_SESSION_ID:-}"
+    [[ -z "$session_id" ]] && return 1
+    [[ ! -f "$REGISTRY_FILE" ]] && return 1
+
+    local current_task=""
+    local current_name=""
+
+    while IFS=, read -r sid tid nm status ts; do
+        [[ "$sid" != "$session_id" ]] && continue
+
+        if [[ "$status" == "active" ]]; then
+            current_task="$tid"
+            current_name="$nm"
+        elif [[ "$status" == "replaced" || "$status" == "left" || "$status" == "claimed" ]]; then
+            if [[ "$tid" == "$current_task" && "$nm" == "$current_name" ]]; then
+                current_task=""
+                current_name=""
+            fi
+        fi
+    done < <(tail -n +2 "$REGISTRY_FILE")
+
+    if [[ -n "$current_task" && -n "$current_name" ]]; then
+        echo "$current_task $current_name"
+        return 0
+    fi
+    return 1
+}
+
+resolve_identity() {
+    if [[ -n "${TF_SESSION_ID:-}" ]]; then
+        local reg=$(get_session_registration 2>/dev/null) || true
+        if [[ -z "$reg" ]]; then
+            error "Session not registered.\nRun: ${CYAN}tf-register task <task-id>${NC}"
+        fi
+        TASK=$(echo "$reg" | cut -d' ' -f1)
+        AGENT=$(echo "$reg" | cut -d' ' -f2)
+    else
+        error "No TF_SESSION_ID set.\nStart your session with: ${CYAN}tf-claude${NC}"
+    fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SLEEP LOG HELPERS
+# ─────────────────────────────────────────────────────────────────────────────
+
+ensure_sleep_log() {
+    if [[ ! -f "$SLEEP_LOG" ]]; then
+        mkdir -p "$(dirname "$SLEEP_LOG")"
+        echo "TASK_ID,NAME,TIME,CALLED_AT" > "$SLEEP_LOG"
+    fi
+}
+
+get_timestamp() {
+    date '+%Y-%m-%dT%H:%M:%S'
+}
+
+get_epoch() {
+    date '+%s'
+}
+
+# Parse ISO timestamp to epoch
+parse_timestamp() {
+    local ts="$1"
+    # macOS date format
+    date -j -f "%Y-%m-%dT%H:%M:%S" "$ts" "+%s" 2>/dev/null || \
+    # Linux date format
+    date -d "$ts" "+%s" 2>/dev/null || \
+    echo "0"
+}
+
+# Get last sleep entry for task+agent
+# Returns: TIME CALLED_AT (space-separated) or empty
+get_last_sleep() {
+    local task="$1"
+    local agent="$2"
+
+    [[ ! -f "$SLEEP_LOG" ]] && return 1
+
+    local last_time=""
+    local last_called=""
+
+    while IFS=, read -r tid nm tm ca
+    do
+        if [[ "$tid" == "$task" && "$nm" == "$agent" ]]; then
+            last_time="$tm"
+            last_called="$ca"
+        fi
+    done < <(tail -n +2 "$SLEEP_LOG")
+
+    if [[ -n "$last_time" && -n "$last_called" ]]; then
+        echo "$last_time $last_called"
+        return 0
+    fi
+    return 1
+}
+
+# Record a sleep entry
+record_sleep() {
+    local task="$1"
+    local agent="$2"
+    local time="$3"
+    local called_at="$4"
+
+    echo "$task,$agent,$time,$called_at" >> "$SLEEP_LOG"
+}
+
+# Get stage index for a duration
+get_stage_index() {
+    local duration="$1"
+    local i=0
+
+    for stage in "${SLEEP_STAGES[@]}"; do
+        if [[ "$duration" -eq "$stage" ]]; then
+            echo "$i"
+            return 0
+        fi
+        i=$((i + 1))
+    done
+
+    # Find closest stage
+    local closest=0
+    local closest_diff=999999
+    i=0
+    for stage in "${SLEEP_STAGES[@]}"; do
+        local diff=$((duration - stage))
+        [[ $diff -lt 0 ]] && diff=$((-diff))
+        if [[ $diff -lt $closest_diff ]]; then
+            closest=$i
+            closest_diff=$diff
+        fi
+        i=$((i + 1))
+    done
+    echo "$closest"
+}
+
+# Get escalation window for a duration
+get_window() {
+    local duration="$1"
+    if [[ "$duration" -ge 90 ]]; then
+        echo "$WINDOW_LONG"
+    else
+        echo "$WINDOW_SHORT"
+    fi
+}
+
+# Format seconds as human readable
+format_duration() {
+    local seconds="$1"
+    if [[ $seconds -lt 60 ]]; then
+        echo "${seconds}s"
+    else
+        echo "$((seconds / 60))m $((seconds % 60))s"
+    fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MESSAGE POLLING
+# ─────────────────────────────────────────────────────────────────────────────
+
+poll_for_messages() {
+    local max_wait="$1"
+    local dry_run="$2"
+    local poll_interval=5
+    local elapsed=0
+
+    local max_fmt=$(format_duration "$max_wait")
+
+    if [[ "$dry_run" == true ]]; then
+        echo -e "${YELLOW}[tf-sleep DRY RUN]${NC}"
+        echo -e "Task:     ${CYAN}$TASK${NC}"
+        echo -e "Agent:    ${BOLD}$AGENT${NC}"
+        echo -e "Mode:     until-new-messages"
+        echo -e "Interval: ${poll_interval}s"
+        echo -e "Timeout:  $max_fmt"
+        return 0
+    fi
+
+    echo -e "${BLUE}[tf-sleep]${NC} ${BOLD}$AGENT${NC} | ${CYAN}$TASK${NC}"
+    echo -e "Waiting for new messages (polling every ${poll_interval}s, timeout $max_fmt)"
+
+    while [[ $elapsed -lt $max_wait ]]; do
+        # Check for unread messages
+        local status_output
+        if ! status_output=$(tf-chat unread --status 2>&1); then
+            echo -e "${RED}Error:${NC} tf-chat failed: $status_output" >&2
+            return 1
+        fi
+
+        # Check if there are unread messages
+        if echo "$status_output" | grep -q "unread message"; then
+            echo -e "${GREEN}[tf-sleep]${NC} Messages found!"
+            echo "$status_output"
+            return 0
+        fi
+
+        # Sleep and increment
+        sleep "$poll_interval"
+        elapsed=$((elapsed + poll_interval))
+
+        # Progress indicator (every 30s)
+        if [[ $((elapsed % 30)) -eq 0 ]]; then
+            local remaining=$((max_wait - elapsed))
+            local remaining_fmt=$(format_duration "$remaining")
+            echo -e "  ... still waiting ($remaining_fmt remaining)"
+        fi
+    done
+
+    # Timeout reached
+    echo -e "${YELLOW}[tf-sleep]${NC} No messages found during wait, please retry"
+    return 1
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MAIN LOGIC
+# ─────────────────────────────────────────────────────────────────────────────
+
+main() {
+    local continue_backoff=false
+    local from_time=""
+    local until_messages=false
+    local max_wait=600
+    local dry_run=false
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --continue|-c)
+                continue_backoff=true
+                shift
+                ;;
+            --from|-f)
+                from_time="$2"
+                shift 2
+                ;;
+            --until-new-messages|-u)
+                until_messages=true
+                shift
+                ;;
+            --max)
+                max_wait="$2"
+                shift 2
+                ;;
+            --dry-run|-d)
+                dry_run=true
+                shift
+                ;;
+            --help|-h)
+                usage
+                exit 0
+                ;;
+            *)
+                error "Unknown option: $1\nUse 'tf-sleep --help' for usage."
+                ;;
+        esac
+    done
+
+    # Validate --max is a number
+    if ! [[ "$max_wait" =~ ^[0-9]+$ ]]; then
+        error "--max requires a number (seconds)"
+    fi
+
+    # Check mutual exclusivity
+    local mode_count=0
+    [[ "$continue_backoff" == true ]] && mode_count=$((mode_count + 1))
+    [[ -n "$from_time" ]] && mode_count=$((mode_count + 1))
+    [[ "$until_messages" == true ]] && mode_count=$((mode_count + 1))
+    if [[ $mode_count -gt 1 ]]; then
+        error "Options --continue, --from, and --until-new-messages are mutually exclusive."
+    fi
+
+    # Get identity from registration
+    resolve_identity
+    ensure_sleep_log
+
+    # Handle --until-new-messages mode
+    if [[ "$until_messages" == true ]]; then
+        poll_for_messages "$max_wait" "$dry_run"
+        return $?
+    fi
+
+    local now_epoch=$(get_epoch)
+    local now_ts=$(get_timestamp)
+    local sleep_duration=0
+    local stage_index=0
+    local max_index=$((${#SLEEP_STAGES[@]} - 1))
+    local reason=""
+
+    if [[ -n "$from_time" ]]; then
+        # Sleep specified time, find closest stage
+        if ! [[ "$from_time" =~ ^[0-9]+$ ]]; then
+            error "--from requires a number (seconds)"
+        fi
+        sleep_duration="$from_time"
+        stage_index=$(get_stage_index "$from_time")
+        reason="manual --from $from_time"
+    elif [[ "$continue_backoff" == true ]]; then
+        # Try to escalate based on history
+        local last=$(get_last_sleep "$TASK" "$AGENT") || true
+
+        if [[ -z "$last" ]]; then
+            # No history - start at stage 0
+            sleep_duration="${SLEEP_STAGES[0]}"
+            stage_index=0
+            reason="first sleep (no history)"
+        else
+            local last_time=$(echo "$last" | cut -d' ' -f1)
+            local last_called=$(echo "$last" | cut -d' ' -f2)
+            local last_epoch=$(parse_timestamp "$last_called")
+
+            local time_since=$((now_epoch - last_epoch))
+            local window=$(get_window "$last_time")
+            local threshold=$((last_time + window))
+
+            if [[ $time_since -le $threshold ]]; then
+                # Within escalation window - escalate
+                local last_stage=$(get_stage_index "$last_time")
+                stage_index=$((last_stage + 1))
+                [[ $stage_index -gt $max_index ]] && stage_index=$max_index
+                sleep_duration="${SLEEP_STAGES[$stage_index]}"
+                reason="escalate (called ${time_since}s after last, within ${threshold}s window)"
+            else
+                # Outside window - activity happened, stay at stage 0
+                sleep_duration="${SLEEP_STAGES[0]}"
+                stage_index=0
+                reason="stage 0 (called ${time_since}s after last, outside ${threshold}s window)"
+            fi
+        fi
+    else
+        # Default: always start at stage 0
+        sleep_duration="${SLEEP_STAGES[0]}"
+        stage_index=0
+        reason="default"
+    fi
+
+    # Calculate next stage info
+    local next_index=$((stage_index + 1))
+    [[ $next_index -gt $max_index ]] && next_index=$max_index
+    local next_duration="${SLEEP_STAGES[$next_index]}"
+    local at_max=""
+    [[ $stage_index -ge $max_index ]] && at_max=" (max)"
+
+    local duration_fmt=$(format_duration "$sleep_duration")
+    local next_fmt=$(format_duration "$next_duration")
+
+    if [[ "$dry_run" == true ]]; then
+        echo -e "${YELLOW}[tf-sleep DRY RUN]${NC}"
+        echo -e "Task:   ${CYAN}$TASK${NC}"
+        echo -e "Agent:  ${BOLD}$AGENT${NC}"
+        echo -e "Stage:  $stage_index$at_max"
+        echo -e "Sleep:  $duration_fmt"
+        echo -e "Reason: $reason"
+        echo -e "Next:   stage $next_index → $next_fmt"
+        exit 0
+    fi
+
+    # Display and sleep
+    echo -e "${BLUE}[tf-sleep]${NC} ${BOLD}$AGENT${NC} | ${CYAN}$TASK${NC}"
+    echo -e "Stage $stage_index$at_max | Sleeping $duration_fmt | $reason"
+
+    # Record BEFORE sleeping (so calledAt reflects when we started)
+    record_sleep "$TASK" "$AGENT" "$sleep_duration" "$now_ts"
+
+    # Actually sleep
+    sleep "$sleep_duration"
+
+    # Done message
+    echo -e "${GREEN}[tf-sleep]${NC} Done. Next sleep: $next_fmt"
+}
+
+main "$@"

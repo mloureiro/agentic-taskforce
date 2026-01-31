@@ -1,0 +1,561 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# tf-register - Manage taskforce session registration
+# Subcommands: new, claim, get, list, status
+
+TASKFORCE_ROOT="$HOME/.claude-taskforce"
+REGISTRY_FILE="$TASKFORCE_ROOT/bin/.registration.log"
+VALID_AGENTS=("red" "blue" "yellow" "green" "pink" "purple" "orange" "cyan")
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+usage() {
+    cat <<EOF
+Usage: tf-register <command> [options]
+
+Manage taskforce session registration.
+
+Commands:
+    new <task-id>               Register for a task (auto-assigns color name)
+    claim <task-id> <name>      Claim an existing name slot (e.g., after crash)
+    clear [task-id] [--force]   Clear all registrations for a task
+    get [session-id]            Get registration info (defaults to current session)
+    list [task-id]              List active registrations
+    status                      Show current session status
+
+Environment:
+    TF_SESSION_ID    Your session identifier (set by tf-claude)
+
+Examples:
+    tf-register new fix-flaky-ci
+    tf-register claim fix-flaky-ci red
+    tf-register clear fix-flaky-ci --force
+    tf-register get
+    tf-register list fix-flaky-ci
+
+EOF
+}
+
+error() {
+    echo -e "${RED}Error:${NC} $1" >&2
+    exit 1
+}
+
+check_session_id() {
+    if [[ -z "${TF_SESSION_ID:-}" ]]; then
+        error "TF_SESSION_ID not set.\nStart your session with: ${CYAN}tf-claude${NC}"
+    fi
+}
+
+validate_task() {
+    local task="$1"
+    local task_dir="$TASKFORCE_ROOT/$task"
+    if [[ ! -d "$task_dir" ]]; then
+        error "Task '$task' does not exist.\nExpected directory: $task_dir\nUse 'tf-init --name $task' to create it."
+    fi
+}
+
+validate_agent() {
+    local agent="$1"
+    for valid in "${VALID_AGENTS[@]}"; do
+        if [[ "$agent" == "$valid" ]]; then
+            return 0
+        fi
+    done
+    error "Invalid agent name: $agent\nValid agents: ${VALID_AGENTS[*]}"
+}
+
+ensure_registry() {
+    if [[ ! -f "$REGISTRY_FILE" ]]; then
+        mkdir -p "$(dirname "$REGISTRY_FILE")"
+        echo "SESSION_ID,TASK_ID,NAME,STATUS,TIMESTAMP" > "$REGISTRY_FILE"
+    fi
+}
+
+get_timestamp() {
+    date '+%Y-%m-%dT%H:%M:%S'
+}
+
+# Get the current holder of a name for a task
+# Returns: session_id or empty
+get_name_holder() {
+    local task="$1"
+    local name="$2"
+
+    # Find the last 'active' entry for this task+name that wasn't superseded
+    # We need to check if there's a later 'claimed', 'replaced', or 'cleared' entry
+
+    local result=""
+    while IFS=, read -r sid tid nm status ts; do
+        [[ "$tid" != "$task" ]] && continue
+        [[ "$nm" != "$name" ]] && continue
+
+        if [[ "$status" == "active" ]]; then
+            result="$sid"
+        elif [[ "$status" == "claimed" || "$status" == "replaced" || "$status" == "cleared" ]]; then
+            # This name was taken from someone or cleared, reset
+            result=""
+        fi
+    done < <(tail -n +2 "$REGISTRY_FILE")
+
+    # Now find who currently holds it (last 'active' for this task+name)
+    local holder=""
+    while IFS=, read -r sid tid nm status ts; do
+        [[ "$tid" != "$task" ]] && continue
+        [[ "$nm" != "$name" ]] && continue
+
+        if [[ "$status" == "active" ]]; then
+            holder="$sid"
+        elif [[ "$status" == "claimed" || "$status" == "replaced" || "$status" == "cleared" ]]; then
+            holder=""
+        fi
+    done < <(tail -n +2 "$REGISTRY_FILE")
+
+    echo "$holder"
+}
+
+# Get current registration for a session
+# Returns: task_id name (space-separated) or empty
+get_session_registration() {
+    local session_id="$1"
+
+    local current_task=""
+    local current_name=""
+
+    while IFS=, read -r sid tid nm status ts; do
+        [[ "$sid" != "$session_id" ]] && continue
+
+        if [[ "$status" == "active" ]]; then
+            current_task="$tid"
+            current_name="$nm"
+        elif [[ "$status" == "replaced" || "$status" == "left" || "$status" == "claimed" || "$status" == "cleared" ]]; then
+            # Session left or was replaced/claimed/cleared, clear
+            if [[ "$tid" == "$current_task" && "$nm" == "$current_name" ]]; then
+                current_task=""
+                current_name=""
+            fi
+        fi
+    done < <(tail -n +2 "$REGISTRY_FILE")
+
+    if [[ -n "$current_task" && -n "$current_name" ]]; then
+        echo "$current_task $current_name"
+    fi
+}
+
+# Get first available name for a task
+get_available_name() {
+    local task="$1"
+
+    for name in "${VALID_AGENTS[@]}"; do
+        local holder=$(get_name_holder "$task" "$name")
+        if [[ -z "$holder" ]]; then
+            echo "$name"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+# Clear all registrations for a task
+# Marks all active registrations as 'cleared'
+clear_task_registrations() {
+    local task="$1"
+    local timestamp=$(get_timestamp)
+    local cleared_count=0
+
+    # Find all active registrations for this task and mark them as cleared
+    for name in "${VALID_AGENTS[@]}"; do
+        local holder=$(get_name_holder "$task" "$name")
+        if [[ -n "$holder" ]]; then
+            echo "$holder,$task,$name,cleared,$timestamp" >> "$REGISTRY_FILE"
+            cleared_count=$((cleared_count + 1))
+        fi
+    done
+
+    echo "$cleared_count"
+}
+
+# Check if a task is unstarted using tf-init --check
+is_task_unstarted() {
+    local task="$1"
+    local status
+    status=$(tf-init --check "$task" 2>/dev/null) || return 1
+    [[ "$status" == "unstarted" ]]
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COMMAND: new
+# ─────────────────────────────────────────────────────────────────────────────
+
+cmd_new() {
+    local task="${1:-}"
+
+    [[ -z "$task" ]] && error "Task ID required.\nUsage: tf-register new <task-id>"
+
+    check_session_id
+    validate_task "$task"
+    ensure_registry
+
+    local session_id="$TF_SESSION_ID"
+    local timestamp=$(get_timestamp)
+
+    # Check if task is unstarted - if so, clear stale registrations
+    if is_task_unstarted "$task"; then
+        local stale_count=0
+        for name in "${VALID_AGENTS[@]}"; do
+            local holder=$(get_name_holder "$task" "$name")
+            if [[ -n "$holder" ]]; then
+                stale_count=$((stale_count + 1))
+            fi
+        done
+
+        if [[ $stale_count -gt 0 ]]; then
+            echo -e "${YELLOW}Task is unstarted, clearing $stale_count stale registration(s)...${NC}"
+            clear_task_registrations "$task" > /dev/null
+        fi
+    fi
+
+    # Check if already registered
+    local existing=$(get_session_registration "$session_id")
+    if [[ -n "$existing" ]]; then
+        local ex_task=$(echo "$existing" | cut -d' ' -f1)
+        local ex_name=$(echo "$existing" | cut -d' ' -f2)
+
+        if [[ "$ex_task" == "$task" ]]; then
+            echo -e "${YELLOW}Already registered${NC}"
+            echo -e "  Task: ${CYAN}$ex_task${NC}"
+            echo -e "  Name: ${BOLD}$ex_name${NC}"
+            return 0
+        else
+            # Switching tasks - mark old as 'left'
+            echo "$session_id,$ex_task,$ex_name,left,$timestamp" >> "$REGISTRY_FILE"
+        fi
+    fi
+
+    # Find available name
+    local assigned_name=$(get_available_name "$task")
+    if [[ -z "$assigned_name" ]]; then
+        echo -e "${RED}All agent names are taken for task '$task'!${NC}" >&2
+        echo -e "Active agents:" >&2
+        for name in "${VALID_AGENTS[@]}"; do
+            local holder=$(get_name_holder "$task" "$name")
+            if [[ -n "$holder" ]]; then
+                echo -e "  ${BOLD}$name${NC} -> $holder" >&2
+            fi
+        done
+        echo -e "\nUse ${CYAN}tf-register claim $task <name>${NC} to take over a slot." >&2
+        exit 1
+    fi
+
+    # Register
+    echo "$session_id,$task,$assigned_name,active,$timestamp" >> "$REGISTRY_FILE"
+
+    echo -e "${GREEN}Registration successful${NC}"
+    echo -e "  Task: ${CYAN}$task${NC}"
+    echo -e "  Name: ${BOLD}$assigned_name${NC}"
+    echo -e "  Session: $session_id"
+    echo ""
+    echo -e "All ${CYAN}tf-*${NC} commands will now auto-detect your identity."
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COMMAND: claim
+# ─────────────────────────────────────────────────────────────────────────────
+
+cmd_claim() {
+    local task="${1:-}"
+    local name="${2:-}"
+
+    [[ -z "$task" ]] && error "Task ID required.\nUsage: tf-register claim <task-id> <name>"
+    [[ -z "$name" ]] && error "Agent name required.\nUsage: tf-register claim <task-id> <name>"
+
+    check_session_id
+    validate_task "$task"
+    validate_agent "$name"
+    ensure_registry
+
+    local session_id="$TF_SESSION_ID"
+    local timestamp=$(get_timestamp)
+
+    # Check if already registered for something
+    local existing=$(get_session_registration "$session_id")
+    if [[ -n "$existing" ]]; then
+        local ex_task=$(echo "$existing" | cut -d' ' -f1)
+        local ex_name=$(echo "$existing" | cut -d' ' -f2)
+
+        if [[ "$ex_task" == "$task" && "$ex_name" == "$name" ]]; then
+            echo -e "${YELLOW}Already registered as $name for $task${NC}"
+            return 0
+        fi
+
+        # Leave old registration
+        echo "$session_id,$ex_task,$ex_name,left,$timestamp" >> "$REGISTRY_FILE"
+    fi
+
+    # Check current holder
+    local current_holder=$(get_name_holder "$task" "$name")
+    if [[ -n "$current_holder" && "$current_holder" != "$session_id" ]]; then
+        # Mark old holder as claimed-from
+        echo "$current_holder,$task,$name,claimed,$timestamp" >> "$REGISTRY_FILE"
+        echo -e "${YELLOW}Taking over from session: $current_holder${NC}"
+    fi
+
+    # Register claim
+    echo "$session_id,$task,$name,active,$timestamp" >> "$REGISTRY_FILE"
+
+    echo -e "${GREEN}Claim successful${NC}"
+    echo -e "  Task: ${CYAN}$task${NC}"
+    echo -e "  Name: ${BOLD}$name${NC}"
+    echo -e "  Session: $session_id"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COMMAND: clear
+# ─────────────────────────────────────────────────────────────────────────────
+
+cmd_clear() {
+    local task=""
+    local force=false
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --force|-f)
+                force=true
+                shift
+                ;;
+            -*)
+                error "Unknown option: $1\nUsage: tf-register clear [task-id] [--force]"
+                ;;
+            *)
+                task="$1"
+                shift
+                ;;
+        esac
+    done
+
+    # If no task provided, try to get from current session
+    if [[ -z "$task" ]]; then
+        if [[ -z "${TF_SESSION_ID:-}" ]]; then
+            error "No task specified and TF_SESSION_ID not set.\nUsage: tf-register clear <task-id> [--force]"
+        fi
+
+        ensure_registry
+        local result=$(get_session_registration "$TF_SESSION_ID")
+        if [[ -z "$result" ]]; then
+            error "No task specified and current session is not registered.\nUsage: tf-register clear <task-id> [--force]"
+        fi
+        task=$(echo "$result" | cut -d' ' -f1)
+    fi
+
+    validate_task "$task"
+    ensure_registry
+
+    # Count active registrations
+    local active_count=0
+    for name in "${VALID_AGENTS[@]}"; do
+        local holder=$(get_name_holder "$task" "$name")
+        if [[ -n "$holder" ]]; then
+            active_count=$((active_count + 1))
+        fi
+    done
+
+    if [[ $active_count -eq 0 ]]; then
+        echo -e "${YELLOW}No active registrations for task '$task'${NC}"
+        return 0
+    fi
+
+    # Show what will be cleared
+    echo -e "Active registrations for ${CYAN}$task${NC}:"
+    for name in "${VALID_AGENTS[@]}"; do
+        local holder=$(get_name_holder "$task" "$name")
+        if [[ -n "$holder" ]]; then
+            if [[ "$holder" == "${TF_SESSION_ID:-}" ]]; then
+                echo -e "  ${BOLD}$name${NC} <- ${GREEN}you${NC} ($holder)"
+            else
+                echo -e "  ${BOLD}$name${NC} <- $holder"
+            fi
+        fi
+    done
+    echo ""
+
+    # Confirm unless --force
+    if [[ "$force" != true ]]; then
+        echo -e "${YELLOW}Are you sure you want to clear all $active_count registration(s)?${NC}"
+        read -p "Type 'yes' to confirm: " confirm
+        if [[ "$confirm" != "yes" ]]; then
+            echo -e "${RED}Aborted${NC}"
+            return 1
+        fi
+    fi
+
+    # Clear registrations
+    local cleared=$(clear_task_registrations "$task")
+    echo -e "${GREEN}Cleared $cleared registration(s) for task '$task'${NC}"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COMMAND: get
+# ─────────────────────────────────────────────────────────────────────────────
+
+cmd_get() {
+    local session_id="${1:-${TF_SESSION_ID:-}}"
+
+    [[ -z "$session_id" ]] && error "No session ID.\nEither pass it as argument or set TF_SESSION_ID."
+
+    ensure_registry
+
+    local result=$(get_session_registration "$session_id")
+
+    if [[ -z "$result" ]]; then
+        # Return error for machine parsing
+        exit 1
+    fi
+
+    # Output: task_id name (space-separated for easy parsing)
+    echo "$result"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COMMAND: list
+# ─────────────────────────────────────────────────────────────────────────────
+
+cmd_list() {
+    local filter_task="${1:-}"
+
+    ensure_registry
+
+    echo -e "${BOLD}Active Registrations${NC}"
+    echo ""
+
+    # Build current state using a temp file (avoid bash 3.x associative array issues)
+    local state_file=$(mktemp)
+    trap "rm -f $state_file" EXIT
+
+    # Process log to find current active registrations
+    while IFS=, read -r sid tid nm status ts; do
+        local key="$tid|$nm"
+
+        if [[ "$status" == "active" ]]; then
+            # Add/update entry
+            grep -v "^$key|" "$state_file" > "$state_file.tmp" 2>/dev/null || true
+            mv "$state_file.tmp" "$state_file"
+            echo "$key|$sid|$ts" >> "$state_file"
+        elif [[ "$status" == "claimed" || "$status" == "left" || "$status" == "replaced" || "$status" == "cleared" ]]; then
+            # Remove entry
+            grep -v "^$key|" "$state_file" > "$state_file.tmp" 2>/dev/null || true
+            mv "$state_file.tmp" "$state_file"
+        fi
+    done < <(tail -n +2 "$REGISTRY_FILE")
+
+    if [[ ! -s "$state_file" ]]; then
+        echo "No active registrations."
+        return 0
+    fi
+
+    # Display grouped by task
+    local current_task=""
+
+    sort "$state_file" | while IFS='|' read -r tid nm sid ts; do
+        # Apply filter
+        if [[ -n "$filter_task" && "$tid" != "$filter_task" ]]; then
+            continue
+        fi
+
+        # Print task header if new
+        if [[ "$tid" != "$current_task" ]]; then
+            [[ -n "$current_task" ]] && echo ""
+            echo -e "${CYAN}$tid${NC}"
+            current_task="$tid"
+        fi
+
+        # Highlight if it's current session
+        if [[ "$sid" == "${TF_SESSION_ID:-}" ]]; then
+            echo -e "  ${BOLD}$nm${NC} <- ${GREEN}you${NC} ($sid)"
+        else
+            echo -e "  ${BOLD}$nm${NC} <- $sid"
+        fi
+    done
+
+    echo ""
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COMMAND: status
+# ─────────────────────────────────────────────────────────────────────────────
+
+cmd_status() {
+    echo -e "${BOLD}Session Status${NC}"
+    echo ""
+
+    if [[ -z "${TF_SESSION_ID:-}" ]]; then
+        echo -e "Session ID: ${RED}not set${NC}"
+        echo -e "\nStart with: ${CYAN}tf-claude${NC}"
+        return 1
+    fi
+
+    echo -e "Session ID: ${BOLD}$TF_SESSION_ID${NC}"
+
+    ensure_registry
+
+    local result=$(get_session_registration "$TF_SESSION_ID")
+
+    if [[ -z "$result" ]]; then
+        echo -e "Registration: ${YELLOW}none${NC}"
+        echo -e "\nRegister with: ${CYAN}tf-register task <task-id>${NC}"
+    else
+        local task=$(echo "$result" | cut -d' ' -f1)
+        local name=$(echo "$result" | cut -d' ' -f2)
+        echo -e "Task: ${CYAN}$task${NC}"
+        echo -e "Name: ${BOLD}$name${NC}"
+    fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MAIN
+# ─────────────────────────────────────────────────────────────────────────────
+
+if [[ $# -eq 0 ]]; then
+    usage
+    exit 1
+fi
+
+command="$1"
+shift
+
+case "$command" in
+    new)
+        cmd_new "$@"
+        ;;
+    claim)
+        cmd_claim "$@"
+        ;;
+    clear)
+        cmd_clear "$@"
+        ;;
+    get)
+        cmd_get "$@"
+        ;;
+    list)
+        cmd_list "$@"
+        ;;
+    status)
+        cmd_status "$@"
+        ;;
+    --help|-h)
+        usage
+        exit 0
+        ;;
+    *)
+        error "Unknown command: $command\nUse 'tf-register --help' for usage."
+        ;;
+esac

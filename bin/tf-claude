@@ -1,0 +1,271 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# tf-claude - Spawn a Claude Code session with taskforce identity
+# Sets TF_SESSION_ID env var for session tracking and optionally registers for a task
+
+TASKFORCE_ROOT="$HOME/.claude-taskforce"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+usage() {
+    cat <<EOF
+Usage: tf-claude [task-id [--claim <name>]] [--verbose] [-- claude-args...]
+
+Boots up a Claude Code session identified to work on a taskforce.
+
+Arguments:
+    [task-id]           Identifies the task agent will work on. Initializes
+                        the task if not yet done and registers the agent.
+
+Options:
+    --claim <name>      Claims existing <name> registration instead of
+                        registering a new agent.
+                        (can only be used if [task-id] is provided)
+    --verbose, -v       Show detailed output during initialization
+    --help, -h          Show this help message
+
+Examples:
+    tf-claude                           # Start session without task
+    tf-claude fix-flaky-ci              # Start and register for task
+    tf-claude fix-flaky-ci --claim red  # Start and claim red slot
+    tf-claude fix-flaky-ci -- --resume  # Register and resume previous claude session
+
+EOF
+}
+
+error() {
+    echo -e "${RED}Error:${NC} $1" >&2
+    exit 1
+}
+
+# Parse arguments
+TASK_ID=""
+CLAIM_NAME=""
+VERBOSE=false
+CLAUDE_ARGS=()
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --help|-h)
+            usage
+            exit 0
+            ;;
+        --verbose|-v)
+            VERBOSE=true
+            shift
+            ;;
+        --claim)
+            if [[ -z "$TASK_ID" ]]; then
+                error "--claim can only be used when task-id is provided"
+            fi
+            if [[ -z "${2:-}" ]]; then
+                error "--claim requires a name argument"
+            fi
+            CLAIM_NAME="$2"
+            shift 2
+            ;;
+        --)
+            shift
+            CLAUDE_ARGS=("$@")
+            break
+            ;;
+        -*)
+            error "Unknown option: $1\nUse --help for usage information."
+            ;;
+        *)
+            if [[ -z "$TASK_ID" ]]; then
+                TASK_ID="$1"
+                shift
+            else
+                error "Unexpected argument: $1\nUse -- to pass arguments to claude."
+            fi
+            ;;
+    esac
+done
+
+# Generate unique session ID (8 alphanumeric chars, like git short hashes)
+export TF_SESSION_ID=$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 8)
+
+# Helper for verbose output
+verbose() {
+    if [[ "$VERBOSE" == true ]]; then
+        echo -e "$@"
+    fi
+}
+
+# If no task-id, just show basic session info and spawn claude
+if [[ -z "$TASK_ID" ]]; then
+    echo -e "${GREEN}Taskforce session initialized${NC}"
+    echo -e "  Session ID: ${BOLD}$TF_SESSION_ID${NC}"
+    echo ""
+    echo -e "${CYAN}Remember:${NC} Run ${BOLD}tf-register new <task-id>${NC} to join a task"
+    echo ""
+
+    # Base allowed tools (no task-specific permissions yet)
+    BASE_ALLOWED_TOOLS=(
+        # Taskforce tools
+        "--allowedTools" "Bash(tf-*)"
+        "--allowedTools" "Bash(tf-chat *)"
+        "--allowedTools" "Bash(tf-register *)"
+        "--allowedTools" "Bash(tf-sleep *)"
+        "--allowedTools" "Bash(tf-status *)"
+
+        # Taskforce file access (read-only, no task dir yet)
+        "--allowedTools" "Read($TASKFORCE_ROOT/**)"
+
+        # Git operations
+        "--allowedTools" "Bash(git diff *)"
+        "--allowedTools" "Bash(git status)"
+        "--allowedTools" "Bash(git log *)"
+        "--allowedTools" "Bash(git show *)"
+        "--allowedTools" "Bash(git branch *)"
+        "--allowedTools" "Bash(git checkout *)"
+        "--allowedTools" "Bash(git add *)"
+        "--allowedTools" "Bash(git commit *)"
+
+        # Common utilities
+        "--allowedTools" "Bash(ls *)"
+        "--allowedTools" "Bash(cat *)"
+        "--allowedTools" "Bash(grep *)"
+        "--allowedTools" "Bash(find *)"
+        "--allowedTools" "Bash(echo *)"
+        "--allowedTools" "Bash(sleep *)"
+        "--allowedTools" "Bash(pwd)"
+
+        # Build tools
+        "--allowedTools" "Bash(pnpm *)"
+        "--allowedTools" "Bash(npm run *)"
+        "--allowedTools" "Bash(npx *)"
+
+        # Project file access (current directory)
+        "--allowedTools" "Read($PWD/**)"
+        "--allowedTools" "Edit($PWD/**)"
+    )
+
+    exec claude "${BASE_ALLOWED_TOOLS[@]}" ${CLAUDE_ARGS[@]+"${CLAUDE_ARGS[@]}"}
+fi
+
+# Task-id provided - full initialization flow
+TASK_DIR="$TASKFORCE_ROOT/$TASK_ID"
+TASK_FILE="$TASK_DIR/TASK.md"
+
+verbose "${GREEN}Taskforce session initialized${NC}"
+verbose "  Session ID: ${BOLD}$TF_SESSION_ID${NC}"
+verbose ""
+
+# Step 1: Ensure task exists
+verbose "${CYAN}Checking task...${NC}"
+INIT_RESULT=$(tf-init --ensure --name "$TASK_ID" 2>&1) || {
+    error "Failed to initialize task: $INIT_RESULT"
+}
+
+TASK_NEWLY_CREATED=false
+if [[ "$INIT_RESULT" == "created" ]]; then
+    TASK_NEWLY_CREATED=true
+    verbose "  Task ${BOLD}$TASK_ID${NC} created"
+else
+    # Check if task exists but is empty (still has template placeholder)
+    if grep -q "<!-- TODO: Add task objective here -->" "$TASK_FILE" 2>/dev/null; then
+        TASK_NEWLY_CREATED=true
+        verbose "  Task ${BOLD}$TASK_ID${NC} exists but is empty"
+    else
+        verbose "  Task ${BOLD}$TASK_ID${NC} exists"
+    fi
+fi
+
+# Step 2: Register or claim
+verbose ""
+verbose "${CYAN}Registering agent...${NC}"
+
+if [[ -n "$CLAIM_NAME" ]]; then
+    # Claim existing slot
+    CLAIM_OUTPUT=$(tf-register claim "$TASK_ID" "$CLAIM_NAME" 2>&1) || {
+        echo -e "$CLAIM_OUTPUT" >&2
+        error "Failed to claim '$CLAIM_NAME' for task '$TASK_ID'"
+    }
+    verbose "$CLAIM_OUTPUT"
+    AGENT_NAME="$CLAIM_NAME"
+else
+    # Register new
+    REGISTER_OUTPUT=$(tf-register new "$TASK_ID" 2>&1) || {
+        echo -e "$REGISTER_OUTPUT" >&2
+        error "Failed to register for task '$TASK_ID'"
+    }
+    verbose "$REGISTER_OUTPUT"
+    # Extract agent name from output (line like "  Name: red")
+    AGENT_NAME=$(echo "$REGISTER_OUTPUT" | grep -E "^\s*Name:" | sed 's/.*Name:[[:space:]]*//' | sed 's/\x1b\[[0-9;]*m//g')
+fi
+
+# Step 3: Output summary
+verbose ""
+echo -e "${GREEN}${BOLD}Ready!${NC} Session ${BOLD}$TF_SESSION_ID${NC} · Agent ${BOLD}$AGENT_NAME${NC} · Task ${CYAN}$TASK_ID${NC}"
+if [[ "$TASK_NEWLY_CREATED" == true ]]; then
+    echo -e "       ${YELLOW}(task newly created)${NC}"
+fi
+echo ""
+# Step 4: Build allowed tools for autonomous operation
+ALLOWED_TOOLS=(
+    # Taskforce tools
+    "--allowedTools" "Bash(tf-*)"
+    "--allowedTools" "Bash(tf-chat *)"
+    "--allowedTools" "Bash(tf-register *)"
+    "--allowedTools" "Bash(tf-sleep *)"
+    "--allowedTools" "Bash(tf-status *)"
+
+    # Taskforce file access
+    "--allowedTools" "Read($TASKFORCE_ROOT/**)"
+    "--allowedTools" "Edit($TASK_DIR/**)"
+
+    # Deny chat log editing (must use tf-chat commands instead)
+    "--disallowedTools" "Edit($TASK_DIR/chat-common.log)"
+    "--disallowedTools" "Edit($TASK_DIR/.chat.log)"
+
+    # Git operations
+    "--allowedTools" "Bash(git diff *)"
+    "--allowedTools" "Bash(git status)"
+    "--allowedTools" "Bash(git log *)"
+    "--allowedTools" "Bash(git show *)"
+    "--allowedTools" "Bash(git branch *)"
+    "--allowedTools" "Bash(git checkout *)"
+    "--allowedTools" "Bash(git add *)"
+    "--allowedTools" "Bash(git commit *)"
+
+    # Common utilities
+    "--allowedTools" "Bash(ls *)"
+    "--allowedTools" "Bash(cat *)"
+    "--allowedTools" "Bash(grep *)"
+    "--allowedTools" "Bash(find *)"
+    "--allowedTools" "Bash(echo *)"
+    "--allowedTools" "Bash(sleep *)"
+    "--allowedTools" "Bash(pwd)"
+
+    # Build tools
+    "--allowedTools" "Bash(pnpm *)"
+    "--allowedTools" "Bash(npm run *)"
+    "--allowedTools" "Bash(npx *)"
+
+    # Project file access (current directory)
+    "--allowedTools" "Read($PWD/**)"
+    "--allowedTools" "Edit($PWD/**)"
+)
+
+# Step 5: Build prompt and spawn claude (auto-executes)
+if [[ "$TASK_NEWLY_CREATED" == true ]]; then
+    PROMPT="You have been picked to be part of a taskforce, read about what is a taskforce in @$TASKFORCE_ROOT/RULES.md.
+You have been registered already, check \`tf-register status\`.
+Let's discuss the task at hand at $TASK_DIR/TASK.md"
+else
+    PROMPT="You have been picked to be part of a taskforce, read about what is a taskforce in @$TASKFORCE_ROOT/RULES.md.
+You have been registered already, check \`tf-register status\`.
+Your task is at $TASK_DIR/TASK.md"
+fi
+
+exec claude "${ALLOWED_TOOLS[@]}" "$PROMPT" ${CLAUDE_ARGS[@]+"${CLAUDE_ARGS[@]}"}

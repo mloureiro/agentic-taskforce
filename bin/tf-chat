@@ -1,0 +1,793 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# tf-chat - Taskforce chat log utilities
+# Subcommands: add, unread, search
+
+TASKFORCE_ROOT="$HOME/.claude-taskforce"
+REGISTRY_FILE="$TASKFORCE_ROOT/bin/.registration.log"
+CHAT_STATE_LOG="$TASKFORCE_ROOT/bin/.chat.log"
+VALID_TYPES=("JOIN" "PROGRESS" "QUESTION" "ANSWER" "FINDING" "DECISION" "BLOCKER" "WAITING" "DONE" "ESCALATE")
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m' # No Color
+
+usage() {
+    cat <<EOF
+Usage: tf-chat <command> [options]
+
+Taskforce chat log utilities.
+
+Commands:
+    add       Add an entry to the chat log
+    unread    Show unread messages since last check
+    search    Search the chat log
+
+Run 'tf-chat <command> --help' for command-specific help.
+
+EOF
+}
+
+usage_add() {
+    cat <<EOF
+Usage: tf-chat add --type <type> [--message <msg> | --file <path> | stdin]
+
+Add an entry to the taskforce chat log.
+
+Options:
+    --type, -T      Message type (required): JOIN, PROGRESS, QUESTION, ANSWER, FINDING,
+                    DECISION, BLOCKER, WAITING, DONE, ESCALATE
+    --message, -m   Message content (optional, can also use --file or stdin)
+    --file, -f      Read message from file (optional)
+    --help, -h      Show this help message
+
+Message source priority:
+    1. --message flag
+    2. --file flag
+    3. stdin (if piped)
+
+Identity: Automatically detected from your registration (tf-register).
+
+Examples:
+    tf-chat add -T PROGRESS -m "Found potential cause"
+    tf-chat add -T FINDING --file /tmp/notes.txt
+    echo "Multi-line message" | tf-chat add -T PROGRESS
+
+EOF
+}
+
+usage_unread() {
+    cat <<EOF
+Usage: tf-chat unread [--status [--full]]
+
+Show unread messages since your last check.
+
+Options:
+    --status, -s    Show only the count of unread messages
+    --full, -f      With --status: also show who posted what (type + timestamp)
+    --help, -h      Show this help message
+
+Behavior:
+    - Shows all messages posted after your last 'unread' call
+    - Your own messages show only type + timestamp (you already know what you wrote)
+    - Other agents' messages show full content
+    - Calling 'unread' updates your read timestamp
+
+Examples:
+    tf-chat unread                # Show all unread messages
+    tf-chat unread --status       # Show "5 unread messages"
+    tf-chat unread --status --full # Show count + summary of who posted
+
+EOF
+}
+
+usage_search() {
+    cat <<EOF
+Usage: tf-chat search [options]
+
+Search the chat log for entries matching criteria.
+
+Options:
+    --query, -q     Search for keyword/phrase in message content (optional)
+    --agent, -a     Filter by agent name (optional)
+    --type, -T      Filter by message type (optional)
+    --limit, -l     Limit number of results (optional, default: all)
+    --full, -f      Show full message content (default: preview)
+    --help, -h      Show this help message
+
+Filters can be combined. All filters must match (AND logic).
+Task is automatically detected from your registration (tf-register).
+
+Examples:
+    tf-chat search -q "transaction"
+    tf-chat search -a blue
+    tf-chat search -T FINDING
+    tf-chat search -a red -T QUESTION -q "parallel"
+    tf-chat search -q "fix" -l 5
+
+EOF
+}
+
+error() {
+    echo -e "${RED}Error:${NC} $1" >&2
+    exit 1
+}
+
+warn() {
+    echo -e "${YELLOW}Warning:${NC} $1" >&2
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# REGISTRATION HELPERS
+# ─────────────────────────────────────────────────────────────────────────────
+
+get_session_registration() {
+    local session_id="${TF_SESSION_ID:-}"
+    [[ -z "$session_id" ]] && return 1
+    [[ ! -f "$REGISTRY_FILE" ]] && return 1
+
+    local current_task=""
+    local current_name=""
+
+    while IFS=, read -r sid tid nm status ts; do
+        [[ "$sid" != "$session_id" ]] && continue
+
+        if [[ "$status" == "active" ]]; then
+            current_task="$tid"
+            current_name="$nm"
+        elif [[ "$status" == "replaced" || "$status" == "left" || "$status" == "claimed" ]]; then
+            if [[ "$tid" == "$current_task" && "$nm" == "$current_name" ]]; then
+                current_task=""
+                current_name=""
+            fi
+        fi
+    done < <(tail -n +2 "$REGISTRY_FILE")
+
+    if [[ -n "$current_task" && -n "$current_name" ]]; then
+        echo "$current_task $current_name"
+        return 0
+    fi
+    return 1
+}
+
+resolve_identity() {
+    if [[ -n "${TF_SESSION_ID:-}" ]]; then
+        local reg=$(get_session_registration 2>/dev/null) || true
+        if [[ -z "$reg" ]]; then
+            error "Session not registered.\nRun: ${CYAN}tf-register task <task-id>${NC}"
+        fi
+        TASK=$(echo "$reg" | cut -d' ' -f1)
+        AGENT=$(echo "$reg" | cut -d' ' -f2)
+    else
+        error "No TF_SESSION_ID set.\nStart your session with: ${CYAN}tf-claude${NC}"
+    fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CHAT STATE HELPERS
+# ─────────────────────────────────────────────────────────────────────────────
+
+ensure_chat_state_log() {
+    if [[ ! -f "$CHAT_STATE_LOG" ]]; then
+        mkdir -p "$(dirname "$CHAT_STATE_LOG")"
+        echo "TASK_ID,NAME,POST_AT,READ_AT" > "$CHAT_STATE_LOG"
+    fi
+}
+
+get_timestamp() {
+    date '+%Y-%m-%dT%H:%M:%S'
+}
+
+get_display_timestamp() {
+    date '+%Y-%m-%d %H:%M:%S'
+}
+
+# Parse ISO timestamp to epoch
+parse_timestamp() {
+    local ts="$1"
+    # macOS date format
+    date -j -f "%Y-%m-%dT%H:%M:%S" "$ts" "+%s" 2>/dev/null || \
+    # Try display format
+    date -j -f "%Y-%m-%d %H:%M:%S" "$ts" "+%s" 2>/dev/null || \
+    # Linux date format
+    date -d "$ts" "+%s" 2>/dev/null || \
+    echo "0"
+}
+
+# Get chat state for task+agent
+# Returns: POST_AT READ_AT (space-separated) or empty
+get_chat_state() {
+    local task="$1"
+    local agent="$2"
+
+    [[ ! -f "$CHAT_STATE_LOG" ]] && return 1
+
+    local last_post=""
+    local last_read=""
+
+    while IFS=, read -r tid nm post_at read_at; do
+        if [[ "$tid" == "$task" && "$nm" == "$agent" ]]; then
+            last_post="$post_at"
+            last_read="$read_at"
+        fi
+    done < <(tail -n +2 "$CHAT_STATE_LOG")
+
+    if [[ -n "$last_post" || -n "$last_read" ]]; then
+        echo "$last_post $last_read"
+        return 0
+    fi
+    return 1
+}
+
+# Update chat state (append new entry)
+update_chat_state() {
+    local task="$1"
+    local agent="$2"
+    local post_at="$3"
+    local read_at="$4"
+
+    ensure_chat_state_log
+    echo "$task,$agent,$post_at,$read_at" >> "$CHAT_STATE_LOG"
+}
+
+# Get current POST_AT for agent, or empty
+get_post_at() {
+    local task="$1"
+    local agent="$2"
+    local state=$(get_chat_state "$task" "$agent") || true
+    if [[ -n "$state" ]]; then
+        echo "$state" | cut -d' ' -f1
+    fi
+}
+
+# Get current READ_AT for agent, or empty
+get_read_at() {
+    local task="$1"
+    local agent="$2"
+    local state=$(get_chat_state "$task" "$agent") || true
+    if [[ -n "$state" ]]; then
+        echo "$state" | cut -d' ' -f2
+    fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CHAT FILE HELPERS
+# ─────────────────────────────────────────────────────────────────────────────
+
+validate_task() {
+    local task="$1"
+    local task_dir="$TASKFORCE_ROOT/$task"
+    if [[ ! -d "$task_dir" ]]; then
+        error "Task '$task' does not exist.\nExpected directory: $task_dir"
+    fi
+}
+
+validate_type() {
+    local type="$1"
+    for valid in "${VALID_TYPES[@]}"; do
+        if [[ "$type" == "$valid" ]]; then
+            return 0
+        fi
+    done
+    error "Invalid message type: $type\nValid types: ${VALID_TYPES[*]}"
+}
+
+validate_agent() {
+    local agent="$1"
+    local valid_agents=("red" "blue" "yellow" "green" "pink" "purple" "orange" "cyan")
+    for valid in "${valid_agents[@]}"; do
+        if [[ "$agent" == "$valid" ]]; then
+            return 0
+        fi
+    done
+    error "Invalid agent name: $agent"
+}
+
+# Count unread messages for agent
+# Returns: count
+count_unread_messages() {
+    local task="$1"
+    local agent="$2"
+    local chat_log="$TASKFORCE_ROOT/$task/.chat.log"
+
+    [[ ! -f "$chat_log" ]] && echo "0" && return 0
+
+    local read_at=$(get_read_at "$task" "$agent")
+    local read_epoch=0
+    if [[ -n "$read_at" ]]; then
+        read_epoch=$(parse_timestamp "$read_at")
+    fi
+
+    local count=0
+    local current_ts=""
+
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^###\ \[([0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}:[0-9]{2})\] ]]; then
+            current_ts="${BASH_REMATCH[1]}"
+            local entry_epoch=$(parse_timestamp "$current_ts")
+            if [[ $entry_epoch -gt $read_epoch ]]; then
+                count=$((count + 1))
+            fi
+        fi
+    done < "$chat_log"
+
+    echo "$count"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COMMAND: add
+# ─────────────────────────────────────────────────────────────────────────────
+
+cmd_add() {
+    local type=""
+    local message=""
+    local file=""
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --type|-T)
+                type="$2"
+                shift 2
+                ;;
+            --message|-m)
+                message="$2"
+                shift 2
+                ;;
+            --file|-f)
+                file="$2"
+                shift 2
+                ;;
+            --help|-h)
+                usage_add
+                exit 0
+                ;;
+            *)
+                error "Unknown option: $1\nUse 'tf-chat add --help' for usage."
+                ;;
+        esac
+    done
+
+    # Resolve identity from registration
+    resolve_identity
+    validate_task "$TASK"
+
+    # Validate required arguments
+    [[ -z "$type" ]] && error "Message type is required. Use --type <type>"
+    validate_type "$type"
+
+    # Get message content (priority: --message > --file > stdin)
+    if [[ -n "$message" ]]; then
+        : # message already set
+    elif [[ -n "$file" ]]; then
+        if [[ ! -f "$file" ]]; then
+            error "File not found: $file"
+        fi
+        message=$(cat "$file")
+    elif [[ ! -t 0 ]]; then
+        # stdin is piped
+        message=$(cat)
+    else
+        error "Message content required. Use --message, --file, or pipe to stdin."
+    fi
+
+    # Trim trailing whitespace but preserve internal newlines
+    message=$(echo "$message" | sed -e 's/[[:space:]]*$//')
+
+    local chat_log="$TASKFORCE_ROOT/$TASK/.chat.log"
+    local timestamp=$(get_display_timestamp)
+    local iso_timestamp=$(get_timestamp)
+
+    # Append entry to chat log
+    {
+        echo "### [$timestamp] $AGENT | $type"
+        echo "$message"
+        echo ""
+    } >> "$chat_log"
+
+    # Update POST_AT in chat state
+    local current_read=$(get_read_at "$TASK" "$AGENT")
+    update_chat_state "$TASK" "$AGENT" "$iso_timestamp" "$current_read"
+
+    # Output confirmation
+    echo -e "${GREEN}Entry added${NC} to $TASK chat log"
+    echo -e "${CYAN}[$timestamp]${NC} ${BOLD}$AGENT${NC} | $type"
+
+    # Show preview of message (first 100 chars)
+    local preview="${message:0:100}"
+    if [[ ${#message} -gt 100 ]]; then
+        preview="$preview..."
+    fi
+    echo "$preview"
+
+    # Show unread count
+    local unread_count=$(count_unread_messages "$TASK" "$AGENT")
+    if [[ $unread_count -gt 0 ]]; then
+        echo ""
+        echo -e "📬 ${YELLOW}${unread_count} unread message(s)${NC}"
+    fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COMMAND: unread
+# ─────────────────────────────────────────────────────────────────────────────
+
+cmd_unread() {
+    local status_only=false
+    local full=false
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --status|-s)
+                status_only=true
+                shift
+                ;;
+            --full|-f)
+                full=true
+                shift
+                ;;
+            --help|-h)
+                usage_unread
+                exit 0
+                ;;
+            *)
+                error "Unknown option: $1\nUse 'tf-chat unread --help' for usage."
+                ;;
+        esac
+    done
+
+    # Resolve identity from registration
+    resolve_identity
+    validate_task "$TASK"
+    ensure_chat_state_log
+
+    local chat_log="$TASKFORCE_ROOT/$TASK/.chat.log"
+
+    if [[ ! -f "$chat_log" ]]; then
+        echo "No messages yet."
+        return 0
+    fi
+
+    local read_at=$(get_read_at "$TASK" "$AGENT")
+    local read_epoch=0
+    if [[ -n "$read_at" ]]; then
+        read_epoch=$(parse_timestamp "$read_at")
+    fi
+
+    # Parse chat log and collect unread entries
+    local entries=()
+    local current_ts=""
+    local current_agent=""
+    local current_type=""
+    local current_message=""
+    local in_entry=false
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        if [[ "$line" =~ ^###\ \[([0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}:[0-9]{2})\]\ ([a-z]+)\ \|\ ([A-Z]+) ]]; then
+            # Save previous entry if unread
+            if [[ "$in_entry" == true ]]; then
+                local entry_epoch=$(parse_timestamp "$current_ts")
+                if [[ $entry_epoch -gt $read_epoch ]]; then
+                    # Trim message
+                    current_message=$(echo "$current_message" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+                    entries+=("$current_ts|$current_agent|$current_type|$current_message")
+                fi
+            fi
+
+            # Start new entry
+            in_entry=true
+            current_ts="${BASH_REMATCH[1]}"
+            current_agent="${BASH_REMATCH[2]}"
+            current_type="${BASH_REMATCH[3]}"
+            current_message=""
+        elif [[ "$in_entry" == true ]]; then
+            if [[ -n "$current_message" ]]; then
+                current_message="$current_message"$'\n'"$line"
+            else
+                current_message="$line"
+            fi
+        fi
+    done < "$chat_log"
+
+    # Don't forget the last entry
+    if [[ "$in_entry" == true ]]; then
+        local entry_epoch=$(parse_timestamp "$current_ts")
+        if [[ $entry_epoch -gt $read_epoch ]]; then
+            current_message=$(echo "$current_message" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+            entries+=("$current_ts|$current_agent|$current_type|$current_message")
+        fi
+    fi
+
+    local count=${#entries[@]}
+
+    # Status only mode (does NOT update READ_AT)
+    if [[ "$status_only" == true ]]; then
+        if [[ $count -eq 0 ]]; then
+            echo "No unread messages."
+        else
+            echo -e "📬 ${YELLOW}${count} unread message(s)${NC}"
+
+            if [[ "$full" == true ]]; then
+                echo ""
+                for entry in "${entries[@]}"; do
+                    local ts=$(echo "$entry" | cut -d'|' -f1)
+                    local ag=$(echo "$entry" | cut -d'|' -f2)
+                    local ty=$(echo "$entry" | cut -d'|' -f3)
+
+                    if [[ "$ag" == "$AGENT" ]]; then
+                        echo -e "${CYAN}[$ts]${NC} [${BOLD}you${NC}] $ty"
+                    else
+                        echo -e "${CYAN}[$ts]${NC} [${BOLD}$ag${NC}] $ty"
+                    fi
+                done
+            fi
+        fi
+        return 0
+    fi
+
+    # Full unread display - UPDATE READ_AT only here
+    local now_ts=$(get_timestamp)
+    local current_post=$(get_post_at "$TASK" "$AGENT")
+    update_chat_state "$TASK" "$AGENT" "$current_post" "$now_ts"
+
+    if [[ $count -eq 0 ]]; then
+        echo "No unread messages."
+        return 0
+    fi
+
+    echo -e "${BOLD}═══════════════════════════════════════════════════════════${NC}"
+    echo -e "📬 ${YELLOW}${count} unread message(s)${NC} in ${CYAN}$TASK${NC}"
+    echo -e "${BOLD}═══════════════════════════════════════════════════════════${NC}"
+    echo ""
+
+    for entry in "${entries[@]}"; do
+        local ts=$(echo "$entry" | cut -d'|' -f1)
+        local ag=$(echo "$entry" | cut -d'|' -f2)
+        local ty=$(echo "$entry" | cut -d'|' -f3)
+        local msg=$(echo "$entry" | cut -d'|' -f4-)
+
+        if [[ "$ag" == "$AGENT" ]]; then
+            # Own message - show only type + timestamp
+            echo -e "${CYAN}[$ts]${NC} [${BOLD}you${NC}] $ty"
+        else
+            # Other agent's message - show full content
+            echo -e "${CYAN}[$ts]${NC} ${BOLD}$ag${NC} | $ty"
+            echo "$msg"
+        fi
+        echo ""
+    done
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COMMAND: search
+# ─────────────────────────────────────────────────────────────────────────────
+
+cmd_search() {
+    local query=""
+    local agent=""
+    local type=""
+    local limit=""
+    local full=false
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --query|-q)
+                query="$2"
+                shift 2
+                ;;
+            --agent|-a)
+                agent="$2"
+                shift 2
+                ;;
+            --type|-T)
+                type="$2"
+                shift 2
+                ;;
+            --limit|-l)
+                limit="$2"
+                shift 2
+                ;;
+            --full|-f)
+                full=true
+                shift
+                ;;
+            --help|-h)
+                usage_search
+                exit 0
+                ;;
+            *)
+                error "Unknown option: $1\nUse 'tf-chat search --help' for usage."
+                ;;
+        esac
+    done
+
+    # Resolve identity from registration
+    resolve_identity
+    validate_task "$TASK"
+
+    if [[ -n "$agent" ]]; then
+        validate_agent "$agent"
+    fi
+
+    if [[ -n "$type" ]]; then
+        validate_type "$type"
+    fi
+
+    if [[ -n "$limit" ]] && ! [[ "$limit" =~ ^[0-9]+$ ]]; then
+        error "Limit must be a positive integer."
+    fi
+
+    # Need at least one filter
+    if [[ -z "$query" && -z "$agent" && -z "$type" ]]; then
+        error "At least one filter required: --query, --agent, or --type"
+    fi
+
+    local chat_log="$TASKFORCE_ROOT/$TASK/.chat.log"
+
+    if [[ ! -f "$chat_log" ]]; then
+        echo "No messages yet."
+        return 0
+    fi
+
+    # Parse the chat log into entries
+    local match_count=0
+    local shown_count=0
+    local in_entry=false
+    local current_timestamp=""
+    local current_agent=""
+    local current_type=""
+    local current_message=""
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        if [[ "$line" =~ ^###\ \[([0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}:[0-9]{2})\]\ ([a-z]+)\ \|\ ([A-Z]+) ]]; then
+            # Process previous entry
+            if [[ "$in_entry" == true ]]; then
+                local matches=true
+
+                # Filter by agent
+                if [[ -n "$agent" && "$current_agent" != "$agent" ]]; then
+                    matches=false
+                fi
+
+                # Filter by type
+                if [[ -n "$type" && "$current_type" != "$type" ]]; then
+                    matches=false
+                fi
+
+                # Filter by query
+                if [[ -n "$query" && "$matches" == true ]]; then
+                    if ! echo "$current_message" | grep -qi "$query"; then
+                        matches=false
+                    fi
+                fi
+
+                if [[ "$matches" == true ]]; then
+                    match_count=$((match_count + 1))
+
+                    if [[ -z "$limit" || $shown_count -lt $limit ]]; then
+                        shown_count=$((shown_count + 1))
+
+                        echo -e "${CYAN}[$current_timestamp]${NC} ${BOLD}$current_agent${NC} | $current_type"
+
+                        if [[ "$full" == true ]]; then
+                            echo "$current_message"
+                        else
+                            local preview=$(echo "$current_message" | tr '\n' ' ' | sed 's/  */ /g')
+                            preview="${preview:0:100}"
+                            if [[ ${#current_message} -gt 100 ]]; then
+                                preview="$preview..."
+                            fi
+                            echo -e "  ${YELLOW}$preview${NC}"
+                        fi
+                        echo ""
+                    fi
+                fi
+            fi
+
+            # Start new entry
+            in_entry=true
+            current_timestamp="${BASH_REMATCH[1]}"
+            current_agent="${BASH_REMATCH[2]}"
+            current_type="${BASH_REMATCH[3]}"
+            current_message=""
+        elif [[ "$in_entry" == true ]]; then
+            if [[ -n "$current_message" || -n "$line" ]]; then
+                if [[ -n "$current_message" ]]; then
+                    current_message="$current_message"$'\n'"$line"
+                else
+                    current_message="$line"
+                fi
+            fi
+        fi
+    done < "$chat_log"
+
+    # Process last entry
+    if [[ "$in_entry" == true ]]; then
+        local matches=true
+
+        if [[ -n "$agent" && "$current_agent" != "$agent" ]]; then
+            matches=false
+        fi
+
+        if [[ -n "$type" && "$current_type" != "$type" ]]; then
+            matches=false
+        fi
+
+        if [[ -n "$query" && "$matches" == true ]]; then
+            if ! echo "$current_message" | grep -qi "$query"; then
+                matches=false
+            fi
+        fi
+
+        if [[ "$matches" == true ]]; then
+            match_count=$((match_count + 1))
+
+            if [[ -z "$limit" || $shown_count -lt $limit ]]; then
+                shown_count=$((shown_count + 1))
+
+                echo -e "${CYAN}[$current_timestamp]${NC} ${BOLD}$current_agent${NC} | $current_type"
+
+                if [[ "$full" == true ]]; then
+                    echo "$current_message"
+                else
+                    local preview=$(echo "$current_message" | tr '\n' ' ' | sed 's/  */ /g')
+                    preview="${preview:0:100}"
+                    if [[ ${#current_message} -gt 100 ]]; then
+                        preview="$preview..."
+                    fi
+                    echo -e "  ${YELLOW}$preview${NC}"
+                fi
+                echo ""
+            fi
+        fi
+    fi
+
+    # Summary
+    if [[ $match_count -eq 0 ]]; then
+        echo "No matches found."
+    elif [[ -n "$limit" && $match_count -gt $limit ]]; then
+        echo -e "${GREEN}Found $match_count matches${NC} (showing $shown_count)"
+    else
+        echo -e "${GREEN}Found $match_count matches${NC}"
+    fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MAIN
+# ─────────────────────────────────────────────────────────────────────────────
+
+if [[ $# -eq 0 ]]; then
+    usage
+    exit 1
+fi
+
+command="$1"
+shift
+
+case "$command" in
+    add)
+        cmd_add "$@"
+        ;;
+    unread)
+        cmd_unread "$@"
+        ;;
+    search)
+        cmd_search "$@"
+        ;;
+    --help|-h)
+        usage
+        exit 0
+        ;;
+    *)
+        error "Unknown command: $command\nUse 'tf-chat --help' for usage."
+        ;;
+esac
