@@ -66,7 +66,7 @@ Choose a descriptive name, ideally including story number if available:
 ### [2024-01-28 14:30:00] red | JOIN
 Hello! I'm red, joining the taskforce.
 Will focus on investigating the database seeding approach.
-Branch: mloureiro/fix-flaky-ci/red
+Branch: $TF_BRANCH_PREFIX/fix-flaky-ci/red
 
 ```
 
@@ -128,7 +128,7 @@ CI passed on all parallel runs (tested 3x).
 Summary:
 - Root cause: Transaction commit race condition
 - Fix: Added explicit commit await in fixture setup
-- Branch: mloureiro/fix-flaky-ci/red
+- Branch: $TF_BRANCH_PREFIX/fix-flaky-ci/red
 - PR: #1234
 
 Findings file updated with full investigation notes.

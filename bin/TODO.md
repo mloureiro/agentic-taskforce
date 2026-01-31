@@ -265,9 +265,9 @@ TASKFORCE STATUS: fix-flaky-ci
 ═══════════════════════════════════════════════════════════
 
 Agents:
-  red     WAITING   last: 5m ago    branch: mloureiro/fix-flaky-ci/red
-  blue    EXPLORING last: 2m ago    branch: mloureiro/fix-flaky-ci/blue
-  yellow  DONE      last: 15m ago   branch: mloureiro/fix-flaky-ci/yellow
+  red     WAITING   last: 5m ago    branch: $TF_BRANCH_PREFIX/fix-flaky-ci/red
+  blue    EXPLORING last: 2m ago    branch: $TF_BRANCH_PREFIX/fix-flaky-ci/blue
+  yellow  DONE      last: 15m ago   branch: $TF_BRANCH_PREFIX/fix-flaky-ci/yellow
 
 Requirements: 2/4 complete
   [x] Identify root cause

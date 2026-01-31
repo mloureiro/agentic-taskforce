@@ -83,7 +83,7 @@ When you first join a taskforce:
    ### [YYYY-MM-DD HH:MM:SS] {{name}} | JOIN
    Hello! I'm {{name}}, joining the taskforce.
    Will focus on: {{your initial focus area}}
-   Branch: mloureiro/{{task-name}}/{{name}}
+   Branch: $TF_BRANCH_PREFIX/{{task-name}}/{{name}}
    ```
 
 6. **Wait for sync:**
@@ -94,7 +94,7 @@ When you first join a taskforce:
 7. **Create your branch:**
    ```bash
    git checkout {{base-branch}}
-   git checkout -b mloureiro/{{task-name}}/{{name}}
+   git checkout -b $TF_BRANCH_PREFIX/{{task-name}}/{{name}}
    ```
 
 8. **Create your findings file:**
@@ -216,7 +216,7 @@ When another agent posts `DONE`:
    Summary:
    - Root cause: {{brief description}}
    - Fix: {{what you changed}}
-   - Branch: mloureiro/{{task-name}}/red
+   - Branch: $TF_BRANCH_PREFIX/{{task-name}}/red
    - PR: #1234 (if created)
 
    Findings file updated. Waiting for human review.
