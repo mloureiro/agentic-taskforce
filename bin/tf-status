@@ -5,7 +5,9 @@ set -euo pipefail
 # tf-status - Taskforce status dashboard
 # Shows agents, activity, requirements progress, and alerts
 
-TASKFORCE_ROOT="${TF_ROOT:-$HOME/.agentic-taskforce}"
+# Calculate taskforce root from script location (parent of bin/)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+TASKFORCE_ROOT="$(dirname "$SCRIPT_DIR")"
 REGISTRY_FILE="$TASKFORCE_ROOT/bin/.registration.log"
 
 # Colors
@@ -81,24 +83,27 @@ get_session_registration() {
     return 1
 }
 
-# Get all active agents for a task
+# Get all active agents for a task (bash 3.x compatible)
 get_active_agents() {
     local task="$1"
     [[ ! -f "$REGISTRY_FILE" ]] && return 0
 
-    declare -A agent_status
-
-    while IFS=, read -r sid tid nm status ts; do
-        [[ "$tid" != "$task" ]] && continue
-
-        if [[ "$status" == "active" ]]; then
-            agent_status[$nm]="active"
-        elif [[ "$status" == "replaced" || "$status" == "left" || "$status" == "claimed" || "$status" == "cleared" ]]; then
-            unset agent_status[$nm] 2>/dev/null || true
-        fi
-    done < <(tail -n +2 "$REGISTRY_FILE")
-
-    echo "${!agent_status[@]}"
+    # Use awk to track agent status and output only active ones
+    tail -n +2 "$REGISTRY_FILE" | awk -F, -v task="$task" '
+    $2 == task {
+        name = $3
+        status = $4
+        if (status == "active") {
+            agents[name] = 1
+        } else if (status == "replaced" || status == "left" || status == "claimed" || status == "cleared") {
+            delete agents[name]
+        }
+    }
+    END {
+        for (name in agents) {
+            printf "%s ", name
+        }
+    }'
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -124,6 +129,52 @@ format_time_ago() {
     else
         echo "$((seconds / 86400))d ago"
     fi
+}
+
+# Get agent stats from chat log (bash 3.x compatible)
+# Output format: agent|last_time|last_type|count
+get_agent_stats() {
+    local chat_log="$1"
+    [[ ! -f "$chat_log" ]] && return 0
+
+    awk '
+    /^### \[[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\] [a-z]+ \| [A-Z]+/ {
+        # Extract timestamp, agent, type from header line
+        match($0, /\[([0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2})\] ([a-z]+) \| ([A-Z]+)/, arr)
+        if (RSTART > 0) {
+            ts = arr[1]
+            agent = arr[2]
+            type = arr[3]
+        } else {
+            # Fallback parsing for older awk
+            gsub(/^### \[/, "")
+            gsub(/\].*/, "")
+            ts = $0
+            # Re-read line for agent and type
+        }
+    }
+    /^### / {
+        # Simpler parsing that works with all awk versions
+        line = $0
+        gsub(/^### \[/, "", line)
+        split(line, parts, /\] /)
+        ts = parts[1]
+        rest = parts[2]
+        split(rest, parts2, / \| /)
+        agent = parts2[1]
+        type = parts2[2]
+
+        if (agent != "" && ts != "") {
+            last_time[agent] = ts
+            last_type[agent] = type
+            count[agent]++
+        }
+    }
+    END {
+        for (agent in last_time) {
+            print agent "|" last_time[agent] "|" last_type[agent] "|" count[agent]
+        }
+    }' "$chat_log"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -183,41 +234,39 @@ main() {
     echo -e "${BOLD}Agents${NC}"
 
     # Get registered agents
-    local registered_agents=$(get_active_agents "$task")
+    local registered_agents
+    registered_agents=$(get_active_agents "$task")
 
     if [[ -z "$registered_agents" ]]; then
         echo -e "  ${DIM}No agents registered${NC}"
     else
-        # Parse chat log to get last activity per agent
-        declare -A agent_last_time
-        declare -A agent_last_type
-        declare -A agent_entry_count
-
-        if [[ -f "$chat_log" ]]; then
-            while IFS= read -r line; do
-                if [[ "$line" =~ ^###\ \[([0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}:[0-9]{2})\]\ ([a-z]+)\ \|\ ([A-Z]+) ]]; then
-                    local ts="${BASH_REMATCH[1]}"
-                    local ag="${BASH_REMATCH[2]}"
-                    local ty="${BASH_REMATCH[3]}"
-
-                    agent_last_time[$ag]="$ts"
-                    agent_last_type[$ag]="$ty"
-                    agent_entry_count[$ag]=$((${agent_entry_count[$ag]:-0} + 1))
-                fi
-            done < "$chat_log"
-        fi
+        # Get agent stats from chat log
+        local stats_data
+        stats_data=$(get_agent_stats "$chat_log")
 
         # Display each agent
         for agent in $registered_agents; do
-            local last_time="${agent_last_time[$agent]:-}"
-            local last_type="${agent_last_type[$agent]:-}"
-            local entry_count="${agent_entry_count[$agent]:-0}"
+            local last_time=""
+            local last_type=""
+            local entry_count="0"
             local time_ago=""
             local status_color="$NC"
             local silence_warning=""
 
+            # Find this agent's stats
+            if [[ -n "$stats_data" ]]; then
+                local agent_line
+                agent_line=$(echo "$stats_data" | grep "^${agent}|" || true)
+                if [[ -n "$agent_line" ]]; then
+                    last_time=$(echo "$agent_line" | cut -d'|' -f2)
+                    last_type=$(echo "$agent_line" | cut -d'|' -f3)
+                    entry_count=$(echo "$agent_line" | cut -d'|' -f4)
+                fi
+            fi
+
             if [[ -n "$last_time" ]]; then
-                local last_epoch=$(parse_timestamp "$last_time")
+                local last_epoch
+                last_epoch=$(parse_timestamp "$last_time")
                 local diff=$((now_epoch - last_epoch))
                 time_ago=$(format_time_ago "$diff")
 
@@ -255,14 +304,14 @@ main() {
 
     if [[ -f "$task_file" ]]; then
         local total=0
-        local done=0
+        local done_count=0
 
         while IFS= read -r line; do
             if [[ "$line" =~ ^[[:space:]]*-[[:space:]]*\[[[:space:]]\] ]]; then
                 total=$((total + 1))
             elif [[ "$line" =~ ^[[:space:]]*-[[:space:]]*\[[xX]\] ]]; then
                 total=$((total + 1))
-                done=$((done + 1))
+                done_count=$((done_count + 1))
             fi
         done < "$task_file"
 
@@ -271,7 +320,7 @@ main() {
         else
             local pct=0
             if [[ $total -gt 0 ]]; then
-                pct=$((done * 100 / total))
+                pct=$((done_count * 100 / total))
             fi
 
             # Progress bar
@@ -279,6 +328,7 @@ main() {
             local filled=$((pct * bar_width / 100))
             local empty=$((bar_width - filled))
             local bar=""
+            local i
             for ((i=0; i<filled; i++)); do bar+="█"; done
             for ((i=0; i<empty; i++)); do bar+="░"; done
 
@@ -289,7 +339,7 @@ main() {
                 color="$YELLOW"
             fi
 
-            echo -e "  ${color}[$bar]${NC} $done/$total ($pct%)"
+            echo -e "  ${color}[$bar]${NC} $done_count/$total ($pct%)"
 
             # Show individual requirements
             echo ""
@@ -327,50 +377,52 @@ main() {
     echo -e "${BOLD}Recent Activity${NC}"
 
     if [[ -f "$chat_log" ]]; then
-        local entries=()
-        local current_ts=""
-        local current_agent=""
-        local current_type=""
-        local current_msg=""
-        local in_entry=false
+        # Use tail and awk to get last 5 entries
+        local recent
+        recent=$(awk '
+        /^### / {
+            if (entry != "") {
+                entries[entry_count++] = entry
+            }
+            entry = $0
+            next
+        }
+        entry != "" && /^[^#]/ && first_line == "" {
+            first_line = $0
+            entry = entry "|" first_line
+        }
+        /^$/ {
+            first_line = ""
+        }
+        END {
+            if (entry != "") {
+                entries[entry_count++] = entry
+            }
+            # Print last 5
+            start = entry_count - 5
+            if (start < 0) start = 0
+            for (i = entry_count - 1; i >= start; i--) {
+                print entries[i]
+            }
+        }' "$chat_log")
 
-        while IFS= read -r line || [[ -n "$line" ]]; do
-            if [[ "$line" =~ ^###\ \[([0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}:[0-9]{2})\]\ ([a-z]+)\ \|\ ([A-Z]+) ]]; then
-                if [[ "$in_entry" == true ]]; then
-                    entries+=("$current_ts|$current_agent|$current_type|$current_msg")
-                fi
-                in_entry=true
-                current_ts="${BASH_REMATCH[1]}"
-                current_agent="${BASH_REMATCH[2]}"
-                current_type="${BASH_REMATCH[3]}"
-                current_msg=""
-            elif [[ "$in_entry" == true && -n "$line" ]]; then
-                if [[ -z "$current_msg" ]]; then
-                    current_msg="$line"
-                fi
-            fi
-        done < "$chat_log"
-
-        if [[ "$in_entry" == true ]]; then
-            entries+=("$current_ts|$current_agent|$current_type|$current_msg")
-        fi
-
-        local count=${#entries[@]}
-        if [[ $count -eq 0 ]]; then
+        if [[ -z "$recent" ]]; then
             echo -e "  ${DIM}No activity yet${NC}"
         else
-            # Show last 5 entries
-            local start=$((count - 5))
-            [[ $start -lt 0 ]] && start=0
+            echo "$recent" | while IFS= read -r entry; do
+                # Parse: ### [timestamp] agent | TYPE|first line of message
+                local header msg
+                header=$(echo "$entry" | cut -d'|' -f1)
+                msg=$(echo "$entry" | cut -d'|' -f2-)
 
-            for ((i = count - 1; i >= start; i--)); do
-                local entry="${entries[$i]}"
-                local ts=$(echo "$entry" | cut -d'|' -f1)
-                local ag=$(echo "$entry" | cut -d'|' -f2)
-                local ty=$(echo "$entry" | cut -d'|' -f3)
-                local msg=$(echo "$entry" | cut -d'|' -f4-)
+                # Extract parts from header
+                local ts ag ty
+                ts=$(echo "$header" | sed 's/^### \[\([^]]*\)\].*/\1/')
+                ag=$(echo "$header" | sed 's/.*\] \([a-z]*\) |.*/\1/')
+                ty=$(echo "$header" | sed 's/.*| \([A-Z]*\).*/\1/')
 
-                local time_only=$(echo "$ts" | cut -d' ' -f2)
+                local time_only
+                time_only=$(echo "$ts" | cut -d' ' -f2)
 
                 # Truncate message
                 msg=$(echo "$msg" | tr '\n' ' ' | sed 's/  */ /g')
@@ -393,17 +445,21 @@ main() {
 
     # Check for silent agents (> 10 minutes)
     if [[ -n "$registered_agents" && -f "$chat_log" ]]; then
-        declare -A agent_last_epoch
-        while IFS= read -r line; do
-            if [[ "$line" =~ ^###\ \[([0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}:[0-9]{2})\]\ ([a-z]+)\ \| ]]; then
-                local ts="${BASH_REMATCH[1]}"
-                local ag="${BASH_REMATCH[2]}"
-                agent_last_epoch[$ag]=$(parse_timestamp "$ts")
-            fi
-        done < "$chat_log"
+        local stats_data
+        stats_data=$(get_agent_stats "$chat_log")
 
         for agent in $registered_agents; do
-            local last_epoch="${agent_last_epoch[$agent]:-0}"
+            local last_time=""
+            local agent_line
+            agent_line=$(echo "$stats_data" | grep "^${agent}|" || true)
+            if [[ -n "$agent_line" ]]; then
+                last_time=$(echo "$agent_line" | cut -d'|' -f2)
+            fi
+
+            local last_epoch=0
+            if [[ -n "$last_time" ]]; then
+                last_epoch=$(parse_timestamp "$last_time")
+            fi
             local silence=$((now_epoch - last_epoch))
 
             if [[ $silence -gt 600 ]]; then
