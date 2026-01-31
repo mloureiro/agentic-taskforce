@@ -5,7 +5,9 @@ set -euo pipefail
 # tf-chat - Taskforce chat log utilities
 # Subcommands: add, unread, search
 
-TASKFORCE_ROOT="${TF_ROOT:-$HOME/.agentic-taskforce}"
+# Calculate taskforce root from script location (parent of bin/)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+TASKFORCE_ROOT="$(dirname "$SCRIPT_DIR")"
 REGISTRY_FILE="$TASKFORCE_ROOT/bin/.registration.log"
 CHAT_STATE_LOG="$TASKFORCE_ROOT/bin/.chat.log"
 VALID_TYPES=("JOIN" "PROGRESS" "QUESTION" "ANSWER" "FINDING" "DECISION" "BLOCKER" "WAITING" "DONE" "ESCALATE")

@@ -5,7 +5,9 @@ set -euo pipefail
 # tf-register - Manage taskforce session registration
 # Subcommands: new, claim, get, list, status
 
-TASKFORCE_ROOT="${TF_ROOT:-$HOME/.agentic-taskforce}"
+# Calculate taskforce root from script location (parent of bin/)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+TASKFORCE_ROOT="$(dirname "$SCRIPT_DIR")"
 REGISTRY_FILE="$TASKFORCE_ROOT/bin/.registration.log"
 VALID_AGENTS=("red" "blue" "yellow" "green" "pink" "purple" "orange" "cyan" "gray" "teal" "indigo" "maroon" "crimson" "lime" "khaki")
 

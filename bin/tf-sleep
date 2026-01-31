@@ -5,7 +5,9 @@ set -euo pipefail
 # tf-sleep - Smart sleep with automatic exponential backoff
 # Tracks sleep history and auto-escalates/resets based on call timing
 
-TASKFORCE_ROOT="${TF_ROOT:-$HOME/.agentic-taskforce}"
+# Calculate taskforce root from script location (parent of bin/)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+TASKFORCE_ROOT="$(dirname "$SCRIPT_DIR")"
 REGISTRY_FILE="$TASKFORCE_ROOT/bin/.registration.log"
 SLEEP_LOG="$TASKFORCE_ROOT/bin/.sleep.log"
 

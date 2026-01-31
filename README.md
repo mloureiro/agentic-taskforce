@@ -27,7 +27,7 @@ Instead of one agent trying approaches sequentially, multiple agents can divide 
 ## How it works
 
 ```
-~/.agentic-taskforce/          # Default, configurable via TF_ROOT
+~/.taskforce/                  # Or wherever you clone the repo
 ├── RULES.md                   # Core directives for agents
 ├── FORMAT.md                  # File formats and conventions
 ├── PATTERNS.md                # Coordination patterns
@@ -59,11 +59,12 @@ Each agent:
 ### Setup
 
 ```bash
-# Add to your shell profile (~/.zshrc or ~/.bashrc)
-export TF_ROOT="/path/to/clone/location"
-export PATH="$TF_ROOT/bin:$PATH"
-export TF_BRANCH_PREFIX="your-username"
+# Clone the repo
+git clone https://github.com/mloureiro/agentic-taskforce.git ~/.taskforce
 
+# Add to your shell profile (~/.zshrc or ~/.bashrc)
+export PATH="$HOME/.taskforce/bin:$PATH"
+export TF_BRANCH_PREFIX="your-username"  # Optional: for git branch naming
 ```
 
 ### Create a task
@@ -121,5 +122,5 @@ See [PATTERNS.md](PATTERNS.md) for detailed examples.
 ## Requirements
 
 - [Claude Code CLI](https://github.com/anthropics/claude-code)
-- Bash 4.0+
+- Bash (3.2+ works, including macOS default)
 - Git
