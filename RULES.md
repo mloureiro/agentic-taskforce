@@ -165,6 +165,55 @@ When waiting for external processes (CI, tests, other agents):
 
 ---
 
+## Version Control Rules
+
+Each task has its own git repository. **Commit early and often** to enable rollback and track progress.
+
+### When to Commit
+
+You MUST commit after:
+
+1. **Any meaningful code change** - fixes, features, refactors
+2. **Updating your findings file** - document your progress
+3. **Before starting a new approach** - checkpoint your current state
+4. **Before running risky operations** - tests, migrations, destructive changes
+
+### Commit Message Format
+
+```
+[agent-name] Brief description of change
+
+Optional longer explanation if needed.
+```
+
+Examples:
+- `[red] Add transaction await to fix race condition`
+- `[blue] Update findings with dead-end approaches`
+- `[yellow] Checkpoint before trying alternative fix`
+
+### Git Commands
+
+```bash
+# Stage and commit your changes
+git add <files>
+git commit -m "[red] Description"
+
+# Check status
+git status
+
+# View recent commits
+git log --oneline -5
+```
+
+### Important
+
+- **Only commit files you own** (your findings file, code you're working on)
+- **Never force push** - other agents may have pulled your changes
+- **Keep commits atomic** - one logical change per commit
+- Commits provide safety nets - if something breaks, you can rollback
+
+---
+
 ## Completion Rules
 
 ### Individual Completion
@@ -330,3 +379,5 @@ tf-sleep --dry-run    # Preview without sleeping
 - Don't go silent for extended periods without notice
 - Don't make assumptions about other agents' progress - check the chat
 - Don't duplicate work another agent already completed (check findings files)
+- Don't make large changes without committing checkpoints
+- Don't forget to commit before trying risky approaches
