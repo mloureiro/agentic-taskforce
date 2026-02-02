@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck shell=bash
 
 set -euo pipefail
 
@@ -20,6 +21,46 @@ YELLOW='\033[0;33m'
 CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
+
+# Build base allowed tools array (populates ALLOWED_TOOLS global)
+build_base_allowed_tools() {
+    ALLOWED_TOOLS=(
+        # Taskforce tools
+        "--allowed-tools" "Bash(tf-*)"
+
+        # Taskforce file access (read-only)
+        "--allowed-tools" "Read($TASKFORCE_ROOT_ABS/**)"
+
+        # Git operations
+        "--allowed-tools" "Bash(git diff *)"
+        "--allowed-tools" "Bash(git status)"
+        "--allowed-tools" "Bash(git log *)"
+        "--allowed-tools" "Bash(git show *)"
+        "--allowed-tools" "Bash(git branch *)"
+        "--allowed-tools" "Bash(git checkout *)"
+        "--allowed-tools" "Bash(git add *)"
+        "--allowed-tools" "Bash(git commit *)"
+        "--allowed-tools" "Bash(git push *)"
+
+        # Common utilities
+        "--allowed-tools" "Bash(ls *)"
+        "--allowed-tools" "Bash(cat *)"
+        "--allowed-tools" "Bash(grep *)"
+        "--allowed-tools" "Bash(find *)"
+        "--allowed-tools" "Bash(echo *)"
+        "--allowed-tools" "Bash(sleep *)"
+        "--allowed-tools" "Bash(pwd)"
+
+        # Build tools
+        "--allowed-tools" "Bash(pnpm *)"
+        "--allowed-tools" "Bash(npm run *)"
+        "--allowed-tools" "Bash(npx *)"
+
+        # Project file access (current directory)
+        "--allowed-tools" "Read($PWD/**)"
+        "--allowed-tools" "Edit($PWD/**)"
+    )
+}
 
 usage() {
     cat <<EOF
@@ -115,49 +156,8 @@ if [[ -z "$TASK_ID" ]]; then
     echo -e "${CYAN}Remember:${NC} Run ${BOLD}tf-register new <task-id>${NC} to join a task"
     echo ""
 
-    # Base allowed tools (no task-specific permissions yet)
-    BASE_ALLOWED_TOOLS=(
-        # Taskforce tools
-        "--allowed-tools" "Bash(tf-*)"
-        "--allowed-tools" "Bash(tf-chat *)"
-        "--allowed-tools" "Bash(tf-register *)"
-        "--allowed-tools" "Bash(tf-sleep *)"
-        "--allowed-tools" "Bash(tf-status *)"
-
-        # Taskforce file access (read-only, no task dir yet)
-        "--allowed-tools" "Read($TASKFORCE_ROOT_ABS/**)"
-
-        # Git operations
-        "--allowed-tools" "Bash(git diff *)"
-        "--allowed-tools" "Bash(git status)"
-        "--allowed-tools" "Bash(git log *)"
-        "--allowed-tools" "Bash(git show *)"
-        "--allowed-tools" "Bash(git branch *)"
-        "--allowed-tools" "Bash(git checkout *)"
-        "--allowed-tools" "Bash(git add *)"
-        "--allowed-tools" "Bash(git commit *)"
-        "--allowed-tools" "Bash(git push *)"
-
-        # Common utilities
-        "--allowed-tools" "Bash(ls *)"
-        "--allowed-tools" "Bash(cat *)"
-        "--allowed-tools" "Bash(grep *)"
-        "--allowed-tools" "Bash(find *)"
-        "--allowed-tools" "Bash(echo *)"
-        "--allowed-tools" "Bash(sleep *)"
-        "--allowed-tools" "Bash(pwd)"
-
-        # Build tools
-        "--allowed-tools" "Bash(pnpm *)"
-        "--allowed-tools" "Bash(npm run *)"
-        "--allowed-tools" "Bash(npx *)"
-
-        # Project file access (current directory)
-        "--allowed-tools" "Read($PWD/**)"
-        "--allowed-tools" "Edit($PWD/**)"
-    )
-
-    exec claude "${BASE_ALLOWED_TOOLS[@]}" ${CLAUDE_ARGS[@]+"${CLAUDE_ARGS[@]}"}
+    build_base_allowed_tools
+    exec claude "${ALLOWED_TOOLS[@]}" ${CLAUDE_ARGS[@]+"${CLAUDE_ARGS[@]}"}
 fi
 
 # Task-id provided - full initialization flow
@@ -220,46 +220,10 @@ if [[ "$TASK_NEWLY_CREATED" == true ]]; then
 fi
 echo ""
 # Step 4: Build allowed tools for autonomous operation
-ALLOWED_TOOLS=(
-    # Taskforce tools
-    "--allowed-tools" "Bash(tf-*)"
-    "--allowed-tools" "Bash(tf-chat *)"
-    "--allowed-tools" "Bash(tf-register *)"
-    "--allowed-tools" "Bash(tf-sleep *)"
-    "--allowed-tools" "Bash(tf-status *)"
-
-    # Taskforce file access
-    "--allowed-tools" "Read($TASKFORCE_ROOT_ABS/**)"
+build_base_allowed_tools
+# Add task-specific edit permission for agent's files
+ALLOWED_TOOLS+=(
     "--allowed-tools" "Edit($TASK_DIR_ABS/*-$AGENT_NAME.*)"
-
-    # Git operations
-    "--allowed-tools" "Bash(git diff *)"
-    "--allowed-tools" "Bash(git status)"
-    "--allowed-tools" "Bash(git log *)"
-    "--allowed-tools" "Bash(git show *)"
-    "--allowed-tools" "Bash(git branch *)"
-    "--allowed-tools" "Bash(git checkout *)"
-    "--allowed-tools" "Bash(git add *)"
-    "--allowed-tools" "Bash(git commit *)"
-    "--allowed-tools" "Bash(git push *)"
-
-    # Common utilities
-    "--allowed-tools" "Bash(ls *)"
-    "--allowed-tools" "Bash(cat *)"
-    "--allowed-tools" "Bash(grep *)"
-    "--allowed-tools" "Bash(find *)"
-    "--allowed-tools" "Bash(echo *)"
-    "--allowed-tools" "Bash(sleep *)"
-    "--allowed-tools" "Bash(pwd)"
-
-    # Build tools
-    "--allowed-tools" "Bash(pnpm *)"
-    "--allowed-tools" "Bash(npm run *)"
-    "--allowed-tools" "Bash(npx *)"
-
-    # Project file access (current directory)
-    "--allowed-tools" "Read($PWD/**)"
-    "--allowed-tools" "Edit($PWD/**)"
 )
 
 # Step 5: Build prompt and spawn claude (auto-executes)
