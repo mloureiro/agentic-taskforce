@@ -126,7 +126,7 @@ Use `tf-chat` to check for messages from other agents:
 When waiting for external processes (CI, tests, other agents):
 
 - Post that you're waiting: `tf-chat add -T WAITING -m "Waiting for CI..."`
-- Use `tf-sleep` for automatic exponential backoff
+- Use `tf-wait` for automatic exponential backoff
 - After each check, post status if there's news
 
 ### Response Expectations
@@ -265,7 +265,7 @@ The following CLI tools are available in `$TF_ROOT/bin/` (should be in PATH).
 | `tf-chat add`     | Add an entry to chat log       | Auto-detects your identity |
 | `tf-chat unread`  | Check for unread messages      | Auto-detects your task     |
 | `tf-chat search`  | Search chat history            | Auto-detects your task     |
-| `tf-sleep`       | Sleep with exponential backoff | Auto-detects your identity |
+| `tf-wait`        | Wait with exponential backoff  | Auto-detects your identity |
 | `tf-status`      | Show taskforce dashboard       | Works for any task         |
 | `tf-init`        | Initialize a new task folder   | Human only - do not use    |
 | `tf-claude`      | Spawn a Claude session         | Human only - spawns you    |
@@ -325,17 +325,18 @@ tf-chat search -T <TYPE>        # Filter by message type
 tf-chat search -q "bug" -a red  # Combine filters
 ```
 
-### tf-sleep
+### tf-wait
 
-Smart sleep with automatic exponential backoff. **Task and agent auto-detected from registration.**
+Smart wait with automatic exponential backoff. **Task and agent auto-detected from registration.**
 
 ```bash
-tf-sleep              # Sleep 5s (stage 0) - default
-tf-sleep --continue   # Escalate if recently slept, otherwise 5s
-tf-sleep --from 60    # Sleep 60s, continue from that stage
-tf-sleep -u           # Wait for new messages (max 10 min)
-tf-sleep -u --max 120 # Wait for new messages (max 2 min)
-tf-sleep --dry-run    # Preview without sleeping
+tf-wait                    # Sleep 5s (stage 0) - default
+tf-wait --continue         # Escalate if recently slept, otherwise 5s
+tf-wait --from 60          # Sleep 60s, continue from that stage
+tf-wait -u                 # Wait for any new messages (max 10 min)
+tf-wait -u red             # Wait for messages from 'red' agent
+tf-wait -u blue --max 120  # Wait for 'blue' messages (max 2 min)
+tf-wait --dry-run          # Preview without sleeping
 ```
 
 **Backoff sequence:** 5s → 10s → 30s → 60s → 90s → 120s → 180s (max)
@@ -347,19 +348,20 @@ tf-sleep --dry-run    # Preview without sleeping
 - If called quickly after last sleep → escalates to next stage
 - If called after a gap (activity happened) → stays at stage 0
 
-**With `--until-new-messages` / `-u`:**
+**With `--until-new-messages` / `-u [user]`:**
 - Polls for unread messages every 5 seconds
 - Exits immediately when messages are found
 - Times out after `--max` seconds (default: 10 minutes)
+- Optional `[user]` argument filters for messages from a specific agent
 
-#### When to use `tf-sleep` vs regular `sleep`
+#### When to use `tf-wait` vs regular `sleep`
 
-**Use `tf-sleep`** for **unknown/variable wait times**:
-- Polling for colleague responses → `tf-sleep -u` (waits for messages)
-- Waiting for external processes with unpredictable duration
-- Checking if something has changed
+**Use `tf-wait -u`** for **waiting on colleagues**:
+- Waiting for any response → `tf-wait -u`
+- Waiting for specific agent → `tf-wait -u red`
+- Asked a question to blue → `tf-wait -u blue --max 300`
 
-**Use `tf-sleep --continue`** when you're in a **retry loop**:
+**Use `tf-wait --continue`** when you're in a **retry loop**:
 - After checking CI status and it's still running
 - After polling and finding no updates yet
 - Escalates wait time automatically to avoid hammering
@@ -369,7 +371,7 @@ tf-sleep --dry-run    # Preview without sleeping
 - Test suite (~10 min) → `tf-chat add -T WAITING -m "Tests running, waiting 10min"` then `sleep 600`
 - Build process (~5 min) → `tf-chat add -T WAITING -m "Building, waiting 5min"` then `sleep 300`
 
-**Why?** Using `tf-sleep` for known long waits wastes resources by waking up every 3 minutes when you know nothing will change for 20 minutes. Log your wait to the chat, then use regular `sleep`.
+**Why?** Using `tf-wait` for known long waits wastes resources by waking up every 3 minutes when you know nothing will change for 20 minutes. Log your wait to the chat, then use regular `sleep`.
 
 ---
 

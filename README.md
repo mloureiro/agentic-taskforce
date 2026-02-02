@@ -37,7 +37,7 @@ Instead of one agent trying approaches sequentially, multiple agents can divide 
 │   ├── tf-init                # Create new tasks
 │   ├── tf-register            # Agent registration
 │   ├── tf-chat                # Chat log operations
-│   ├── tf-sleep               # Smart exponential backoff
+│   ├── tf-wait                # Smart wait with backoff
 │   └── tf-status              # Dashboard view
 │
 └── <task-name>/               # Per-task folder (separate git repo)
@@ -109,7 +109,7 @@ See [PATTERNS.md](PATTERNS.md) for detailed examples.
 | `tf-register`       | Manage agent registration |
 | `tf-chat add`       | Post to chat log          |
 | `tf-chat unread`    | Check for new messages    |
-| `tf-sleep`          | Smart backoff for polling |
+| `tf-wait`           | Smart wait with backoff   |
 | `tf-status`         | View taskforce dashboard  |
 
 ## Documentation
