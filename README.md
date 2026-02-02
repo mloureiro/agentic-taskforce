@@ -64,7 +64,7 @@ git clone https://github.com/mloureiro/agentic-taskforce.git ~/.taskforce
 
 # Add to your shell profile (~/.zshrc or ~/.bashrc)
 export PATH="$HOME/.taskforce/bin:$PATH"
-export TF_BRANCH_PREFIX="your-username"  # Optional: for git branch naming
+export TF_BRANCH_PREFIX=""  # Optional: prefix for git branch naming (e.g., your username)
 ```
 
 ### Create a task

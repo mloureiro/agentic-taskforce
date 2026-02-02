@@ -58,12 +58,14 @@ tf-register status
 Each agent works on their own branch following this convention:
 
 ```
-$TF_BRANCH_PREFIX/{{task-name}}/{{agent-name}}
+${TF_BRANCH_PREFIX:+$TF_BRANCH_PREFIX/}{{task-name}}/{{agent-name}}
 ```
 
-Example: `user/fix-flaky-ci/red`
+Examples:
+- With `TF_BRANCH_PREFIX=user`: `user/fix-flaky-ci/red`
+- With `TF_BRANCH_PREFIX=""` (empty): `fix-flaky-ci/red`
 
-**Environment variable:** Set `TF_BRANCH_PREFIX` to your preferred prefix (e.g., your username).
+**Environment variable:** Optionally set `TF_BRANCH_PREFIX` to a prefix (e.g., your username).
 
 ---
 

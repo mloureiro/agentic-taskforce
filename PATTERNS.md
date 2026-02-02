@@ -32,7 +32,7 @@ Each agent creates their own branch from the same base:
 
 ```bash
 git checkout main
-git checkout -b $TF_BRANCH_PREFIX/{{task-name}}/{{agent-name}}
+git checkout -b ${TF_BRANCH_PREFIX:+$TF_BRANCH_PREFIX/}{{task-name}}/{{agent-name}}
 ```
 
 ### When Complete
@@ -72,18 +72,18 @@ Feature X
 **Option A: Same branch** (when agents need to see each other's changes)
 ```bash
 # Both work on same branch, careful with file conflicts
-git checkout -b $TF_BRANCH_PREFIX/{{task-name}}/shared
+git checkout -b ${TF_BRANCH_PREFIX:+$TF_BRANCH_PREFIX/}{{task-name}}/shared
 ```
 
 **Option B: Sequential branches** (cleaner separation)
 ```bash
 # API agent first
 git checkout main
-git checkout -b $TF_BRANCH_PREFIX/{{task-name}}/api
+git checkout -b ${TF_BRANCH_PREFIX:+$TF_BRANCH_PREFIX/}{{task-name}}/api
 
 # FE agent branches from API branch
-git checkout $TF_BRANCH_PREFIX/{{task-name}}/api
-git checkout -b $TF_BRANCH_PREFIX/{{task-name}}/frontend
+git checkout ${TF_BRANCH_PREFIX:+$TF_BRANCH_PREFIX/}{{task-name}}/api
+git checkout -b ${TF_BRANCH_PREFIX:+$TF_BRANCH_PREFIX/}{{task-name}}/frontend
 ```
 
 ### Contract Agreement
@@ -146,11 +146,11 @@ Large Feature
 ```bash
 # Phase 1
 git checkout main
-git checkout -b $TF_BRANCH_PREFIX/{{task-name}}/phase1
+git checkout -b ${TF_BRANCH_PREFIX:+$TF_BRANCH_PREFIX/}{{task-name}}/phase1
 
 # Phase 2 (after phase 1 complete)
-git checkout $TF_BRANCH_PREFIX/{{task-name}}/phase1
-git checkout -b $TF_BRANCH_PREFIX/{{task-name}}/phase2-feature-a
+git checkout ${TF_BRANCH_PREFIX:+$TF_BRANCH_PREFIX/}{{task-name}}/phase1
+git checkout -b ${TF_BRANCH_PREFIX:+$TF_BRANCH_PREFIX/}{{task-name}}/phase2-feature-a
 ```
 
 ### Handoff Protocol
@@ -158,7 +158,7 @@ git checkout -b $TF_BRANCH_PREFIX/{{task-name}}/phase2-feature-a
 ```
 ### [2024-01-28 15:00:00] red | DONE
 Phase 1 complete. Foundation is ready.
-Branch: $TF_BRANCH_PREFIX/big-feature/phase1
+Branch: ${TF_BRANCH_PREFIX:+$TF_BRANCH_PREFIX/}big-feature/phase1
 
 Phase 2 agents: please branch from my branch and continue.
 Key files changed:
@@ -245,7 +245,7 @@ Feature X
 ```
 ### [2024-01-28 15:00:00] red | PROGRESS
 Implemented the authentication flow. Ready for review.
-Branch: $TF_BRANCH_PREFIX/auth-feature/red
+Branch: ${TF_BRANCH_PREFIX:+$TF_BRANCH_PREFIX/}auth-feature/red
 Commit: abc123
 
 Key changes:
