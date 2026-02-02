@@ -228,13 +228,15 @@ ALLOWED_TOOLS+=(
 
 # Step 5: Build prompt and spawn claude (auto-executes)
 if [[ "$TASK_NEWLY_CREATED" == true ]]; then
-    PROMPT="You have been picked to be part of a taskforce, read about what is a taskforce in @$TASKFORCE_ROOT/RULES.md.
-You have been registered already, check \`tf-register status\`.
+    PROMPT="You are agent '$AGENT_NAME' assigned to the '$TASK_ID' taskforce' (session: $TF_SESSION_ID).
+Read about taskforces in @$TASKFORCE_ROOT/RULES.md.
 Let's discuss the task at hand at @$TASK_DIR/TASK.md"
 else
-    PROMPT="You have been picked to be part of a taskforce, read about what is a taskforce in @$TASKFORCE_ROOT/RULES.md.
-You have been registered already, check \`tf-register status\`.
-Your task is at @$TASK_DIR/TASK.md"
+    PROMPT="You are '$AGENT_NAME', assigned to the '$TASK_ID' taskforce (session: $TF_SESSION_ID).
+Read the taskforce rules at @$TASKFORCE_ROOT/RULES.md
+Introduce yourself: \`tf-chat add -T JOIN -m 'Hi! I will check the task and come back soon'\`
+Your task is at @$TASK_DIR/TASK.md
+Check the chat log for any instructions, otherwise proceed with the task."
 fi
 
 exec claude "${ALLOWED_TOOLS[@]}" -- "$PROMPT" ${CLAUDE_ARGS[@]+"${CLAUDE_ARGS[@]}"}
