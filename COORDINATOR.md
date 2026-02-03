@@ -159,21 +159,33 @@ tf-chat add -T DECISION -m "@blue: Green's PR merged. You're unblocked for Phase
 
 **You do NOT debug their CI failures** - that's their job.
 
-### When Agent Reports DONE
+### When Agent Submits for Review
 
-Agent says: "PR #X ready - CI all green"
+Agent says: `WAITING -r REVIEW` — "PR #X ready for review - CI all green"
 
 You:
 1. **Verify CI passed:** `gh pr checks <number>`
 2. Quick sanity check of changes (optional)
-3. **Merge to parent:** `gh pr merge <number> --squash --delete-branch`
-4. Announce: `tf-chat add -T PROGRESS -m "PR #X merged! @next-agent you're unblocked."`
+3. **Request changes** if needed: `tf-chat add -T ANSWER -m "@agent: Fix X, Y, Z. Re-submit when CI green."`
+4. **Merge to parent:** `gh pr merge <number> --squash --delete-branch`
+5. **Dismiss the agent:** `tf-chat add -T DECISION -m "@agent: PR #X merged. You're dismissed."`
+6. Announce unblocks to other agents if applicable
 
-### If Agent Reports DONE But CI Failing
+### ⚠️ You MUST Dismiss Agents
+
+**Agents are waiting for you to dismiss them.** After merging (or if no more work), explicitly tell each agent they can log off:
+
+```bash
+tf-chat add -T DECISION -m "@green: PR #20 merged. You're dismissed — post DONE and log off."
+```
+
+Agents will keep polling until you dismiss them. Don't leave them hanging.
+
+### If Agent Submits But CI Failing
 
 Direct them to fix it:
 ```bash
-tf-chat add -T ANSWER -m "@agent: CI is failing. Fix and report DONE when green."
+tf-chat add -T ANSWER -m "@agent: CI is failing. Fix and re-submit when green."
 ```
 
 **Do NOT fix their CI yourself.**
@@ -255,14 +267,14 @@ If agents accidentally modify same files:
 | `orders-{agent}.md` | Detailed task instructions, file lists, constraints |
 | `tf-chat` | Coordination: "start", "done", "validated", "continue", handoffs |
 
-### Acknowledge Agent Completion
+### Acknowledge Agent Submission
 
-When agent reports DONE with green CI:
+When agent submits for review with green CI:
 ```bash
-tf-chat add -T PROGRESS -m "@agent: PR received. Merging now."
+tf-chat add -T PROGRESS -m "@agent: PR received. Reviewing now."
 ```
 
-Then merge and announce to unblocked agents.
+Then review, merge, dismiss the agent, and announce unblocks to other agents.
 
 ### Answer Questions Quickly
 
@@ -306,6 +318,7 @@ Check off completed work in the master task doc.
 - **Don't implement code** - that's what agents are for
 - **Don't debug agent CI** - they own it, direct them to fix
 - **Don't merge failing CI** - wait for green
+- **Don't forget to dismiss agents** - they're waiting for you to release them
 - **Don't start new phase** before current phase merges
 - **Don't ignore agent questions** - they're blocked on you
 - **Don't put detailed orders in chat** - use orders files
@@ -331,6 +344,9 @@ gh pr checks <num>
 
 # Merge agent PR to parent (only when CI green!)
 gh pr merge <num> --squash --delete-branch
+
+# Dismiss agent after merge
+tf-chat add -T DECISION -m "@agent: PR merged. You're dismissed — post DONE and log off."
 
 # Announce unblock
 tf-chat add -T PROGRESS -m "PR merged! @next-agent you're unblocked."

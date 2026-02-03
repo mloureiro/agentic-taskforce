@@ -142,17 +142,19 @@ cd <package> && npm run lint && npm run typecheck
 
 When in doubt, check the project docs or ask the coordinator.
 
-### Only Report DONE When Green
+### Only Submit for Review When CI is Green
+
+**Never ask for review until CI passes.** If CI is still running, wait for it first.
 
 ```bash
 # WRONG - CI hasn't passed yet
-tf-chat add -T DONE -m "PR created!"
+tf-chat add -T WAITING -r REVIEW -m "PR created!"
 
 # WRONG - CI is failing
-tf-chat add -T DONE -m "PR ready, CI has some issues"
+tf-chat add -T WAITING -r REVIEW -m "PR ready, CI has some issues"
 
-# RIGHT - CI is green
-tf-chat add -T DONE -m "@red: PR #15 ready - CI all green ✓"
+# RIGHT - CI is green, now request review
+tf-chat add -T WAITING -r REVIEW -m "@{{coordinator}}: PR #15 ready for review - CI all green ✓"
 ```
 
 ---
@@ -183,17 +185,39 @@ gh pr checks <number>
 
 **If CI fails, fix it before reporting DONE.**
 
-### Report Completion
+### Report Ready for Review
 
 Only after CI passes:
 ```bash
-tf-chat add -T DONE -m "@red: PR #X ready - CI all green ✓
+tf-chat add -T WAITING -r REVIEW -m "@{{coordinator}}: PR #X ready for review - CI all green ✓
 
 Deliverables:
 - ✅ Item 1
 - ✅ Item 2
 - ✅ Item 3"
 ```
+
+### Post-Submission Protocol (MANDATORY)
+
+⚠️ **Submitting for review is NOT the end of your session.** You MUST remain active until the coordinator dismisses you.
+
+After submitting for review:
+
+1. **Enter a wait loop** — poll for coordinator messages:
+   ```bash
+   tf-wait -u {{coordinator}} --max 600
+   ```
+2. **Address any requested changes** — fix issues, push, wait for CI again, re-submit
+3. **Keep polling** — if `tf-wait` times out with no message, run it again
+4. **Wait for dismissal** — only the coordinator can tell you to log off
+5. **Post DONE only after dismissal** — `DONE` is your final message, confirming you're signing off
+
+```bash
+# After coordinator says "PR merged, you're done":
+tf-chat add -T DONE -m "Signing off. PR #X merged."
+```
+
+**The coordinator decides when you're finished, not you.**
 
 ---
 
@@ -246,16 +270,18 @@ cat ~/.taskforce/{task-name}/findings-*.md
 **Do NOT announce unblocks to other agents.** That's the coordinator's job.
 
 Your job:
-1. Report DONE when CI green
-2. Wait for coordinator to merge
-3. Coordinator will announce to other agents
+1. Submit for review when CI green
+2. Wait for coordinator to review and merge
+3. Wait for coordinator to dismiss you
+4. Coordinator will announce to other agents
 
 ```bash
 # WRONG - don't do this
 tf-chat add -T PROGRESS -m "@pink: My PR merged - you're unblocked"
 
-# RIGHT - just report done to coordinator
-tf-chat add -T DONE -m "@red: PR #X ready - CI green ✓"
+# RIGHT - submit for review, then wait
+tf-chat add -T WAITING -r REVIEW -m "@{{coordinator}}: PR #X ready for review - CI green ✓"
+tf-wait -u {{coordinator}} --max 600
 ```
 
 ---
@@ -304,7 +330,9 @@ If your task is **partial work** (someone else continues):
 
 ## Anti-Patterns (DO NOT)
 
-- **Don't report DONE with failing CI** - fix it first
+- **Don't submit for review with failing CI** - fix it first
+- **Don't use DONE before coordinator dismisses you** - DONE is your sign-off, not your submission
+- **Don't go idle after submitting for review** - stay in a `tf-wait` loop
 - **Don't expect coordinator to fix your CI** - you own it
 - **Don't PR to main** - PR to parent branch
 - **Don't batch commits** - commit atomically
@@ -344,11 +372,14 @@ git push
 # Report progress
 tf-chat add -T PROGRESS -m "..."
 
-# Report done (ONLY when CI green)
-tf-chat add -T DONE -m "@red: PR #X ready - CI green ✓"
+# Submit for review (ONLY when CI green)
+tf-chat add -T WAITING -r REVIEW -m "@{{coordinator}}: PR #X ready for review - CI green ✓"
 
-# Wait for response
-tf-wait -u red --max 300
+# Wait for coordinator review (keep looping until dismissed)
+tf-wait -u {{coordinator}} --max 600
+
+# After coordinator dismisses you
+tf-chat add -T DONE -m "Signing off. PR #X merged."
 
 # Rebase if needed
 git fetch origin && git rebase origin/{task-name} && git push --force-with-lease

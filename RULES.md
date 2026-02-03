@@ -110,7 +110,8 @@ You MUST post updates using `tf-chat add`:
 3. When you make a significant finding: `tf-chat add -T FINDING -m "..."`
 4. When you have a question for others: `tf-chat add -T QUESTION -m "..."`
 5. When you're entering a long wait: `tf-chat add -T WAITING -r <REASON> -m "..."`
-6. When you believe you've completed the task: `tf-chat add -T DONE -m "..."`
+6. When submitting work for review: `tf-chat add -T WAITING -r REVIEW -m "..."`
+7. When coordinator dismisses you (final message): `tf-chat add -T DONE -m "..."`
 
 ### Checking for Updates
 
@@ -222,10 +223,14 @@ git log --oneline -5
 
 When you believe you've solved your part:
 
-1. Ensure your findings file is fully updated
-2. Post `DONE` message to `.chat.log` with summary
-3. Reference your branch and any PR if created
-4. Wait for human review in your session
+1. Ensure CI is green (code tasks) — **do NOT submit for review before CI passes**
+2. Ensure your findings file is fully updated
+3. Post `WAITING -r REVIEW` message with summary and PR reference
+4. **Enter a wait loop** — poll for coordinator messages using `tf-wait -u {{coordinator}}`
+5. Address any review feedback (fix, push, re-wait for CI, re-submit)
+6. **Wait for coordinator to tell you to log off** — keep polling until dismissed
+
+⚠️ **`DONE` is your sign-off message, NOT your submission.** Only post `DONE` after the coordinator explicitly dismisses you. In coordinated tasks, `DONE` = "I'm logging off now."
 
 ### Task Completion
 
@@ -379,7 +384,7 @@ tf-wait --dry-run          # Preview without sleeping
 
 - Don't overwrite common files
 - Don't work on another agent's branch without explicit coordination
-- Don't claim "DONE" without meeting all requirements
+- Don't use "DONE" before coordinator dismisses you — DONE means signing off, not submitting
 - Don't go silent for extended periods without notice
 - Don't make assumptions about other agents' progress - check the chat
 - Don't duplicate work another agent already completed (check findings files)
