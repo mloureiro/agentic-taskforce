@@ -139,7 +139,7 @@ while not done:
 Post a `WAITING` message before entering a long wait:
 
 ```
-### [2024-01-28 15:00:00] red | WAITING
+### [2024-01-28 15:00:00] red | WAITING [CI]
 CI running for my fix branch.
 Pipeline URL: https://...
 Expected: ~20 mins

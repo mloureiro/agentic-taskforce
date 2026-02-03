@@ -251,7 +251,8 @@ else
 # Created: $(date '+%Y-%m-%d %H:%M:%S')
 #
 # Format: ### [YYYY-MM-DD HH:MM:SS] agent-name | TYPE
-# Types: JOIN, PROGRESS, QUESTION, ANSWER, FINDING, DECISION, BLOCKER, WAITING, DONE, ESCALATE
+# Types: JOIN, PROGRESS, QUESTION, ANSWER, FINDING, DECISION, BLOCKER, WAITING [REASON], DONE, ESCALATE
+# WAITING reasons: ASSIGNMENT, CI, REVIEW, AGENT, USER, OTHER
 #
 # Rules: APPEND ONLY - Do not edit or delete entries
 # ─────────────────────────────────────────────────────────────────────────────

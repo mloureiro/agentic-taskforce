@@ -210,7 +210,7 @@ tf-wait -u red --max 300    # Wait max 5 min for red
 
 Don't use tf-sleep for CI - use regular sleep since you know it takes time:
 ```bash
-tf-chat add -T WAITING -m "CI running, waiting ~5-10 min"
+tf-chat add -T WAITING -r CI -m "CI running, waiting ~5-10 min"
 sleep 300    # 5 min
 gh pr checks <number>
 ```

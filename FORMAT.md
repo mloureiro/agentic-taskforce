@@ -55,7 +55,7 @@ Choose a descriptive name, ideally including story number if available:
 | `FINDING` | Important discovery | Found something significant |
 | `DECISION` | Announce a choice | Making a choice that affects others |
 | `BLOCKER` | Report being stuck | Hit an obstacle |
-| `WAITING` | Entering wait state | Starting a long wait (CI, etc.) |
+| `WAITING` | Entering wait state | Starting a long wait (CI, etc.). Requires reason: ASSIGNMENT, CI, REVIEW, AGENT, USER, OTHER |
 | `DONE` | Task complete | Believe you've finished |
 | `ESCALATE` | Need human help | Requires human intervention |
 
@@ -111,7 +111,7 @@ Fix: Add `await tx.commit()` before returning from fixture setup.
 
 **Waiting:**
 ```
-### [2024-01-28 15:00:00] red | WAITING
+### [2024-01-28 15:00:00] red | WAITING [CI]
 Pushed fix to branch. CI running.
 Pipeline: https://app.circleci.com/pipelines/xxx/123
 Expected duration: ~20 mins

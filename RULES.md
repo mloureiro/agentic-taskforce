@@ -109,7 +109,7 @@ You MUST post updates using `tf-chat add`:
 2. Progress updates every 3-5 minutes while actively working: `tf-chat add -T PROGRESS -m "..."`
 3. When you make a significant finding: `tf-chat add -T FINDING -m "..."`
 4. When you have a question for others: `tf-chat add -T QUESTION -m "..."`
-5. When you're entering a long wait: `tf-chat add -T WAITING -m "..."`
+5. When you're entering a long wait: `tf-chat add -T WAITING -r <REASON> -m "..."`
 6. When you believe you've completed the task: `tf-chat add -T DONE -m "..."`
 
 ### Checking for Updates
@@ -125,7 +125,7 @@ Use `tf-chat` to check for messages from other agents:
 
 When waiting for external processes (CI, tests, other agents):
 
-- Post that you're waiting: `tf-chat add -T WAITING -m "Waiting for CI..."`
+- Post that you're waiting: `tf-chat add -T WAITING -r CI -m "Waiting for CI..."`
 - Use `tf-wait` for automatic exponential backoff
 - After each check, post status if there's news
 
@@ -300,7 +300,7 @@ tf-chat add -T <TYPE> --file /path/to/file
 echo "message" | tf-chat add -T <TYPE>
 ```
 
-**Types:** JOIN, PROGRESS, QUESTION, ANSWER, FINDING, DECISION, BLOCKER, WAITING, DONE, ESCALATE
+**Types:** JOIN, PROGRESS, QUESTION, ANSWER, FINDING, DECISION, BLOCKER, WAITING (requires -r), DONE, ESCALATE
 
 ### tf-chat unread
 
@@ -367,9 +367,9 @@ tf-wait --dry-run          # Preview without sleeping
 - Escalates wait time automatically to avoid hammering
 
 **Use regular `sleep`** for **known wait times**:
-- CI pipeline (~20 min) → `tf-chat add -T WAITING -m "CI running, waiting 20min"` then `sleep 1200`
-- Test suite (~10 min) → `tf-chat add -T WAITING -m "Tests running, waiting 10min"` then `sleep 600`
-- Build process (~5 min) → `tf-chat add -T WAITING -m "Building, waiting 5min"` then `sleep 300`
+- CI pipeline (~20 min) → `tf-chat add -T WAITING -r CI -m "CI running, waiting 20min"` then `sleep 1200`
+- Test suite (~10 min) → `tf-chat add -T WAITING -r CI -m "Tests running, waiting 10min"` then `sleep 600`
+- Build process (~5 min) → `tf-chat add -T WAITING -r CI -m "Building, waiting 5min"` then `sleep 300`
 
 **Why?** Using `tf-wait` for known long waits wastes resources by waking up every 3 minutes when you know nothing will change for 20 minutes. Log your wait to the chat, then use regular `sleep`.
 

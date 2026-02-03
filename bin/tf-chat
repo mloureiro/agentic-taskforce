@@ -11,6 +11,7 @@ TASKFORCE_ROOT="$(dirname "$SCRIPT_DIR")"
 REGISTRY_FILE="$TASKFORCE_ROOT/bin/.registration.log"
 CHAT_STATE_LOG="$TASKFORCE_ROOT/bin/.chat.log"
 VALID_TYPES=("JOIN" "PROGRESS" "QUESTION" "ANSWER" "FINDING" "DECISION" "BLOCKER" "WAITING" "DONE" "ESCALATE")
+VALID_WAITING_REASONS=("ASSIGNMENT" "CI" "REVIEW" "AGENT" "USER" "OTHER")
 
 # Colors for output
 RED='\033[0;31m'
@@ -39,13 +40,15 @@ EOF
 
 usage_add() {
     cat <<EOF
-Usage: tf-chat add --type <type> [--message <msg> | --file <path> | stdin]
+Usage: tf-chat add --type <type> [--reason <reason>] [--message <msg> | --file <path> | stdin]
 
 Add an entry to the taskforce chat log.
 
 Options:
     --type, -T      Message type (required): JOIN, PROGRESS, QUESTION, ANSWER, FINDING,
                     DECISION, BLOCKER, WAITING, DONE, ESCALATE
+    --reason, -r    Waiting reason (required for WAITING): ASSIGNMENT, CI, REVIEW, AGENT, USER, OTHER
+                    When reason is OTHER, the next positional argument is used as the description
     --message, -m   Message content (optional, can also use --file or stdin)
     --file, -f      Read message from file (optional)
     --help, -h      Show this help message
@@ -59,6 +62,9 @@ Identity: Automatically detected from your registration (tf-register).
 
 Examples:
     tf-chat add -T PROGRESS -m "Found potential cause"
+    tf-chat add -T WAITING -r CI -m "CI running, waiting ~20 min"
+    tf-chat add -T WAITING -r REVIEW -m "PR #15 waiting for review"
+    tf-chat add -T WAITING -r OTHER "custom reason" -m "Waiting for something specific"
     tf-chat add -T FINDING --file /tmp/notes.txt
     echo "Multi-line message" | tf-chat add -T PROGRESS
 
@@ -100,6 +106,7 @@ Options:
     --query, -q     Search for keyword/phrase in message content (optional)
     --agent, -a     Filter by agent name (optional)
     --type, -T      Filter by message type (optional)
+    --reason, -r    Filter by waiting reason (optional, only applies to WAITING entries)
     --limit, -l     Limit number of results (optional, default: all)
     --full, -f      Show full message content (default: preview)
     --help, -h      Show this help message
@@ -111,6 +118,7 @@ Examples:
     tf-chat search -q "transaction"
     tf-chat search -a blue
     tf-chat search -T FINDING
+    tf-chat search -T WAITING -r CI
     tf-chat search -a red -T QUESTION -q "parallel"
     tf-chat search -q "fix" -l 5
 
@@ -311,7 +319,7 @@ count_unread_messages() {
     local current_ts=""
 
     while IFS= read -r line; do
-        if [[ "$line" =~ ^###\ \[([0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}:[0-9]{2})\] ]]; then
+        if [[ "$line" =~ ^###\ \[([0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}:[0-9]{2})\]\ ([a-z]+)\ \|\ ([A-Z]+)(\ \[([^]]+)\])? ]]; then
             current_ts="${BASH_REMATCH[1]}"
             local entry_epoch=$(parse_timestamp "$current_ts")
             if [[ $entry_epoch -gt $read_epoch ]]; then
@@ -331,6 +339,8 @@ cmd_add() {
     local type=""
     local message=""
     local file=""
+    local reason=""
+    local reason_text=""
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -338,6 +348,15 @@ cmd_add() {
             --type|-T)
                 type="$2"
                 shift 2
+                ;;
+            --reason|-r)
+                reason="$2"
+                shift 2
+                # If reason is OTHER, consume next positional arg as description
+                if [[ "$reason" == "OTHER" && $# -gt 0 && ! "$1" =~ ^- ]]; then
+                    reason_text="$1"
+                    shift
+                fi
                 ;;
             --message|-m)
                 message="$2"
@@ -365,6 +384,29 @@ cmd_add() {
     [[ -z "$type" ]] && error "Message type is required. Use --type <type>"
     validate_type "$type"
 
+    # Validate reason
+    if [[ "$type" == "WAITING" && -z "$reason" ]]; then
+        error "Reason is required for WAITING. Use -r <REASON>\nValid reasons: ${VALID_WAITING_REASONS[*]}"
+    fi
+    if [[ -n "$reason" && "$type" != "WAITING" ]]; then
+        error "-r is only valid with -T WAITING"
+    fi
+    if [[ -n "$reason" ]]; then
+        local valid_reason=false
+        for vr in "${VALID_WAITING_REASONS[@]}"; do
+            if [[ "$reason" == "$vr" ]]; then
+                valid_reason=true
+                break
+            fi
+        done
+        if [[ "$valid_reason" == false ]]; then
+            error "Invalid waiting reason: $reason\nValid reasons: ${VALID_WAITING_REASONS[*]}"
+        fi
+        if [[ "$reason" == "OTHER" && -z "$reason_text" ]]; then
+            error "OTHER reason requires a description.\nUsage: tf-chat add -T WAITING -r OTHER \"description\" -m \"message\""
+        fi
+    fi
+
     # Get message content (priority: --message > --file > stdin)
     if [[ -n "$message" ]]; then
         : # message already set
@@ -387,9 +429,19 @@ cmd_add() {
     local timestamp=$(get_display_timestamp)
     local iso_timestamp=$(get_timestamp)
 
+    # Build header with optional reason
+    local header="### [$timestamp] $AGENT | $type"
+    if [[ -n "$reason" ]]; then
+        if [[ "$reason" == "OTHER" ]]; then
+            header="$header [OTHER: $reason_text]"
+        else
+            header="$header [$reason]"
+        fi
+    fi
+
     # Append entry to chat log
     {
-        echo "### [$timestamp] $AGENT | $type"
+        echo "$header"
         echo "$message"
         echo ""
     } >> "$chat_log"
@@ -398,9 +450,19 @@ cmd_add() {
     local current_read=$(get_read_at "$TASK" "$AGENT")
     update_chat_state "$TASK" "$AGENT" "$iso_timestamp" "$current_read"
 
+    # Build display type with reason
+    local display_type="$type"
+    if [[ -n "$reason" ]]; then
+        if [[ "$reason" == "OTHER" ]]; then
+            display_type="$type [OTHER: $reason_text]"
+        else
+            display_type="$type [$reason]"
+        fi
+    fi
+
     # Output confirmation
     echo -e "${GREEN}Entry added${NC} to $TASK chat log"
-    echo -e "${CYAN}[$timestamp]${NC} ${BOLD}$AGENT${NC} | $type"
+    echo -e "${CYAN}[$timestamp]${NC} ${BOLD}$AGENT${NC} | $display_type"
 
     # Show preview of message (first 100 chars)
     local preview="${message:0:100}"
@@ -473,7 +535,7 @@ cmd_unread() {
     local in_entry=false
 
     while IFS= read -r line || [[ -n "$line" ]]; do
-        if [[ "$line" =~ ^###\ \[([0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}:[0-9]{2})\]\ ([a-z]+)\ \|\ ([A-Z]+) ]]; then
+        if [[ "$line" =~ ^###\ \[([0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}:[0-9]{2})\]\ ([a-z]+)\ \|\ ([A-Z]+)(\ \[([^]]+)\])? ]]; then
             # Save previous entry if unread
             if [[ "$in_entry" == true ]]; then
                 local entry_epoch=$(parse_timestamp "$current_ts")
@@ -489,6 +551,11 @@ cmd_unread() {
             current_ts="${BASH_REMATCH[1]}"
             current_agent="${BASH_REMATCH[2]}"
             current_type="${BASH_REMATCH[3]}"
+            local current_reason="${BASH_REMATCH[5]}"
+            # Include reason in display type
+            if [[ -n "$current_reason" ]]; then
+                current_type="$current_type [$current_reason]"
+            fi
             current_message=""
         elif [[ "$in_entry" == true ]]; then
             if [[ -n "$current_message" ]]; then
@@ -576,6 +643,7 @@ cmd_search() {
     local query=""
     local agent=""
     local type=""
+    local reason=""
     local limit=""
     local full=false
 
@@ -592,6 +660,10 @@ cmd_search() {
                 ;;
             --type|-T)
                 type="$2"
+                shift 2
+                ;;
+            --reason|-r)
+                reason="$2"
                 shift 2
                 ;;
             --limit|-l)
@@ -624,13 +696,26 @@ cmd_search() {
         validate_type "$type"
     fi
 
+    if [[ -n "$reason" ]]; then
+        local valid_reason=false
+        for vr in "${VALID_WAITING_REASONS[@]}"; do
+            if [[ "$reason" == "$vr" ]]; then
+                valid_reason=true
+                break
+            fi
+        done
+        if [[ "$valid_reason" == false ]]; then
+            error "Invalid waiting reason: $reason\nValid reasons: ${VALID_WAITING_REASONS[*]}"
+        fi
+    fi
+
     if [[ -n "$limit" ]] && ! [[ "$limit" =~ ^[0-9]+$ ]]; then
         error "Limit must be a positive integer."
     fi
 
     # Need at least one filter
-    if [[ -z "$query" && -z "$agent" && -z "$type" ]]; then
-        error "At least one filter required: --query, --agent, or --type"
+    if [[ -z "$query" && -z "$agent" && -z "$type" && -z "$reason" ]]; then
+        error "At least one filter required: --query, --agent, --type, or --reason"
     fi
 
     local chat_log="$TASKFORCE_ROOT/$TASK/.chat.log"
@@ -647,10 +732,12 @@ cmd_search() {
     local current_timestamp=""
     local current_agent=""
     local current_type=""
+    local current_reason=""
+    local current_display_type=""
     local current_message=""
 
     while IFS= read -r line || [[ -n "$line" ]]; do
-        if [[ "$line" =~ ^###\ \[([0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}:[0-9]{2})\]\ ([a-z]+)\ \|\ ([A-Z]+) ]]; then
+        if [[ "$line" =~ ^###\ \[([0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}:[0-9]{2})\]\ ([a-z]+)\ \|\ ([A-Z]+)(\ \[([^]]+)\])? ]]; then
             # Process previous entry
             if [[ "$in_entry" == true ]]; then
                 local matches=true
@@ -663,6 +750,18 @@ cmd_search() {
                 # Filter by type
                 if [[ -n "$type" && "$current_type" != "$type" ]]; then
                     matches=false
+                fi
+
+                # Filter by reason
+                if [[ -n "$reason" && "$matches" == true ]]; then
+                    if [[ "$reason" == "OTHER" ]]; then
+                        # Match "OTHER: ..." or "OTHER"
+                        if [[ "$current_reason" != OTHER* ]]; then
+                            matches=false
+                        fi
+                    elif [[ "$current_reason" != "$reason" ]]; then
+                        matches=false
+                    fi
                 fi
 
                 # Filter by query
@@ -678,7 +777,7 @@ cmd_search() {
                     if [[ -z "$limit" || $shown_count -lt $limit ]]; then
                         shown_count=$((shown_count + 1))
 
-                        echo -e "${CYAN}[$current_timestamp]${NC} ${BOLD}$current_agent${NC} | $current_type"
+                        echo -e "${CYAN}[$current_timestamp]${NC} ${BOLD}$current_agent${NC} | $current_display_type"
 
                         if [[ "$full" == true ]]; then
                             echo "$current_message"
@@ -700,6 +799,12 @@ cmd_search() {
             current_timestamp="${BASH_REMATCH[1]}"
             current_agent="${BASH_REMATCH[2]}"
             current_type="${BASH_REMATCH[3]}"
+            current_reason="${BASH_REMATCH[5]}"
+            if [[ -n "$current_reason" ]]; then
+                current_display_type="$current_type [$current_reason]"
+            else
+                current_display_type="$current_type"
+            fi
             current_message=""
         elif [[ "$in_entry" == true ]]; then
             if [[ -n "$current_message" || -n "$line" ]]; then
@@ -724,6 +829,17 @@ cmd_search() {
             matches=false
         fi
 
+        # Filter by reason
+        if [[ -n "$reason" && "$matches" == true ]]; then
+            if [[ "$reason" == "OTHER" ]]; then
+                if [[ "$current_reason" != OTHER* ]]; then
+                    matches=false
+                fi
+            elif [[ "$current_reason" != "$reason" ]]; then
+                matches=false
+            fi
+        fi
+
         if [[ -n "$query" && "$matches" == true ]]; then
             if ! echo "$current_message" | grep -qi "$query"; then
                 matches=false
@@ -736,7 +852,7 @@ cmd_search() {
             if [[ -z "$limit" || $shown_count -lt $limit ]]; then
                 shown_count=$((shown_count + 1))
 
-                echo -e "${CYAN}[$current_timestamp]${NC} ${BOLD}$current_agent${NC} | $current_type"
+                echo -e "${CYAN}[$current_timestamp]${NC} ${BOLD}$current_agent${NC} | $current_display_type"
 
                 if [[ "$full" == true ]]; then
                     echo "$current_message"
