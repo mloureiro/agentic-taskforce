@@ -385,3 +385,25 @@ tf-wait --dry-run          # Preview without sleeping
 - Don't duplicate work another agent already completed (check findings files)
 - Don't make large changes without committing checkpoints
 - Don't forget to commit before trying risky approaches
+
+---
+
+## Coordinated Tasks
+
+Some tasks have a **coordinator** (team lead) who assigns work and manages the team.
+
+### If the task is coordinated:
+
+**Coordinator (typically "red"):**
+- Read `COORDINATOR.md` for coordinator-specific rules
+- You assign tasks, review PRs, merge - you do NOT implement code
+
+**Agents (everyone else):**
+- Read `AGENT.md` for worker-specific rules
+- You implement code, own CI, report DONE when green
+
+### How to know if coordinated:
+
+- Check `TASK.md` - it will mention if there's a coordinator
+- Check the chat - coordinator will be assigning work
+- If you're "red" and there are orders files, you're likely the coordinator
