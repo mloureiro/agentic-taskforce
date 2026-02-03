@@ -8,12 +8,29 @@ These rules are for **implementation agents** (green, blue, pink, etc.). Read `R
 
 **You implement code and complete tasks.** Your responsibilities are:
 
-1. **Read orders** from coordinator (orders-{your-name}.md)
+1. **Read orders** from coordinator (`orders-{your-name}.md`)
 2. **Implement** the assigned work
 3. **Own CI** - your PR must pass before reporting DONE
-4. **Atomic commits** - commit after each logical change
-5. **Report progress** via chat
-6. **Create PR** when work is complete and CI passes
+4. **Fix CI failures** - if your changes break CI, you fix them
+5. **Atomic commits** - commit after each logical change
+6. **Report progress** via chat
+7. **Create PR** to parent branch when work is complete
+
+---
+
+## Branch Model
+
+### Hierarchical Branches
+
+You work on a sub-branch of the parent task branch:
+
+```
+main
+  └── {task-name} (parent branch)
+        └── {task-name}/{your-name} (YOUR branch)
+```
+
+**Your PR targets the parent branch, NOT main.**
 
 ---
 
@@ -21,31 +38,30 @@ These rules are for **implementation agents** (green, blue, pink, etc.). Read `R
 
 ### 1. Check for Orders
 
+Read your orders file:
 ```bash
 cat ~/.taskforce/{task-name}/orders-{your-name}.md
 ```
 
-Or check chat for directions:
+Also check chat for any updates:
 ```bash
 tf-chat unread
 ```
 
 ### 2. Create Your Branch
 
-Always work from fresh main:
+Branch from the **parent branch**, not main:
 ```bash
 git fetch origin
-git checkout main
-git pull origin main
-git checkout -b {task-name}/{your-name}
+git checkout -b {task-name}/{your-name} origin/{task-name}
 ```
 
-Branch naming: `{task-name}/{your-name}` (e.g., `tunadao-modernize-3/green`)
+Example: `sc-57566/top-partner-badge-emails/green`
 
 ### 3. Announce You're Starting
 
 ```bash
-tf-chat add -T PROGRESS -m "@red: Starting work on {task}. Will: 1) ... 2) ... 3) ..."
+tf-chat add -T PROGRESS -m "@red: Starting work per orders-{your-name}.md"
 ```
 
 ---
@@ -62,7 +78,7 @@ git commit -m "[{your-name}] Brief description"
 ```
 
 Examples:
-- `[green] Add Hero component to classic template`
+- `[green] Add Hero component to template`
 - `[blue] Fix lint errors in resolver`
 
 ### Progress Updates
@@ -77,7 +93,7 @@ tf-chat add -T PROGRESS -m "Completed X, now working on Y..."
 If unclear about requirements:
 ```bash
 tf-chat add -T QUESTION -m "@red: Should I do X or Y?"
-tf-wait -u red --max 300    # Wait for red's response (max 5 min, assuming red is coordinator)
+tf-wait -u red --max 300    # Wait for red's response (max 5 min)
 ```
 
 Don't block forever - continue other work while waiting.
@@ -88,36 +104,43 @@ Don't block forever - continue other work while waiting.
 
 ### You Own Your CI
 
-**YOU are responsible for making CI pass.** Don't report DONE until:
+**YOU are responsible for making CI pass.** This is non-negotiable.
+
+Don't report DONE until:
 - Lint passes
 - Type check passes
 - Tests pass
 - Build succeeds
 
-### Verify Locally First
+### If Your Changes Break CI
 
-Before pushing:
-```bash
-npm run lint
-npm run typecheck
-npm run test
-npm run build
-```
+**You fix them.** Don't expect the coordinator to debug your CI.
 
-### After Pushing
-
-Check CI status:
-```bash
-gh pr checks <number>
-```
-
-**If CI fails:**
-1. Check logs: `gh run view <run-id> --log-failed`
+1. Check logs: `gh pr checks <number>` or `gh run view <run-id> --log-failed`
 2. Fix the issues locally
 3. Push fixes
 4. Wait for CI to re-run
+5. Only report DONE when green
 
-**Note:** Free GitHub runners can take up to 30 minutes to start. Be patient.
+### Verify Locally First
+
+Before pushing, run the project's verification commands. Check the project's `CLAUDE.md` or `AGENTS.md` for specific instructions.
+
+**Common patterns:**
+```bash
+# Single-package projects
+npm run lint && npm run typecheck && npm run build
+
+# Monorepos (run for YOUR package only, not all)
+cd <package> && npm run lint && npm run typecheck
+```
+
+**Note:** Some projects have constraints:
+- **Monorepos:** Don't run checks for all packages - only your affected package(s)
+- **Test limitations:** Some projects can't run tests locally (DB dependencies, time)
+- **CI is authoritative:** If unsure what to run locally, push and let CI tell you
+
+When in doubt, check the project docs or ask the coordinator.
 
 ### Only Report DONE When Green
 
@@ -125,26 +148,24 @@ gh pr checks <number>
 # WRONG - CI hasn't passed yet
 tf-chat add -T DONE -m "PR created!"
 
+# WRONG - CI is failing
+tf-chat add -T DONE -m "PR ready, CI has some issues"
+
 # RIGHT - CI is green
-tf-chat add -T DONE -m "PR #15 ready - all CI checks green ✓"
+tf-chat add -T DONE -m "@red: PR #15 ready - CI all green ✓"
 ```
 
 ---
 
 ## Creating PRs
 
-### When to Create PR
+### Target the Parent Branch
 
-Create PR when:
-1. Work is complete per orders
-2. Local checks pass (lint, typecheck, build, tests)
-3. You've verified CI will likely pass
-
-### Create the PR
+**IMPORTANT:** Your PR targets the parent branch, NOT main.
 
 ```bash
-git push -u origin {branch-name}
-gh pr create --title "feat: description" --body "## Summary
+git push -u origin {task-name}/{your-name}
+gh pr create --base {task-name} --title "[{your-name}] Description" --body "## Summary
 - Point 1
 - Point 2
 
@@ -160,13 +181,13 @@ After PR creation, monitor CI:
 gh pr checks <number>
 ```
 
-If CI fails, fix it before reporting DONE.
+**If CI fails, fix it before reporting DONE.**
 
 ### Report Completion
 
 Only after CI passes:
 ```bash
-tf-chat add -T DONE -m "@red: PR #X ready for review - CI all green ✓
+tf-chat add -T DONE -m "@red: PR #X ready - CI all green ✓
 
 Deliverables:
 - ✅ Item 1
@@ -187,7 +208,7 @@ tf-wait -u red --max 300    # Wait max 5 min for red
 
 ### Waiting for CI
 
-Don't use tf-wait for CI - use regular sleep since you know it takes time:
+Don't use tf-sleep for CI - use regular sleep since you know it takes time:
 ```bash
 tf-chat add -T WAITING -m "CI running, waiting ~5-10 min"
 sleep 300    # 5 min
@@ -239,6 +260,20 @@ tf-chat add -T DONE -m "@red: PR #X ready - CI green ✓"
 
 ---
 
+## If You Need to Rebase
+
+When coordinator merges other PRs to parent, you may need to rebase:
+
+```bash
+git fetch origin
+git rebase origin/{task-name}
+git push --force-with-lease
+```
+
+Then wait for CI to re-run.
+
+---
+
 ## Exceptions: Non-Code Tasks
 
 **Non-code tasks** are things like:
@@ -249,7 +284,6 @@ tf-chat add -T DONE -m "@red: PR #X ready - CI green ✓"
 
 If your task is truly non-code:
 - You don't need CI to pass
-- You don't count toward the 3 code-agent limit
 - Report findings via chat or findings files
 
 **If you're making commits, you're a code agent.** This includes:
@@ -271,33 +305,41 @@ If your task is **partial work** (someone else continues):
 ## Anti-Patterns (DO NOT)
 
 - **Don't report DONE with failing CI** - fix it first
+- **Don't expect coordinator to fix your CI** - you own it
+- **Don't PR to main** - PR to parent branch
 - **Don't batch commits** - commit atomically
 - **Don't go silent** - post progress every 3-5 min
 - **Don't modify others' files** without coordination
 - **Don't block forever** on questions - continue other work
 - **Don't skip local checks** before pushing
-- **Don't assume CI is fast** - free runners can take 30 min
+- **Don't assume CI is fast** - runners can take time
 
 ---
 
 ## Quick Reference
 
 ```bash
-# Start work
-git checkout main && git pull && git checkout -b {task}/{name}
+# Start work (branch from PARENT, not main)
+git fetch origin
+git checkout -b {task-name}/{your-name} origin/{task-name}
 
 # Commit atomically
-git add <files> && git commit -m "[{name}] description"
+git add <files> && git commit -m "[{your-name}] description"
 
-# Check local
-npm run lint && npm run typecheck && npm run build
+# Check local (see project's CLAUDE.md for specific commands)
+# Example: cd <package> && npm run lint && npm run typecheck
 
-# Push and create PR
-git push -u origin {branch}
-gh pr create --title "feat: X" --body "..."
+# Push and create PR (to PARENT branch)
+git push -u origin {task-name}/{your-name}
+gh pr create --base {task-name} --title "[{your-name}] X" --body "..."
 
 # Check CI
 gh pr checks <number>
+
+# If CI fails - FIX IT YOURSELF
+gh run view <run-id> --log-failed
+# ... fix issues ...
+git push
 
 # Report progress
 tf-chat add -T PROGRESS -m "..."
@@ -307,4 +349,7 @@ tf-chat add -T DONE -m "@red: PR #X ready - CI green ✓"
 
 # Wait for response
 tf-wait -u red --max 300
+
+# Rebase if needed
+git fetch origin && git rebase origin/{task-name} && git push --force-with-lease
 ```

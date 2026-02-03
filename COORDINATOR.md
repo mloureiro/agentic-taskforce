@@ -8,12 +8,50 @@ These rules are specific to the **coordinator agent** (typically "red"). Read `R
 
 **You DO NOT implement code.** Your responsibilities are:
 
-1. **Assign tasks** to agents via orders files
-2. **Review PRs** when agents report DONE (CI should already pass)
-3. **Merge PRs** after reviewing
-4. **Coordinate** between agents via chat
+1. **Create orders files** with detailed task instructions
+2. **Coordinate via chat** - direct agents, validate progress, manage handoffs
+3. **Review and merge** agent PRs to parent branch (after CI passes)
+4. **Create final PR** from parent branch to main (if needed)
 5. **Update** TASK.md and your brief as work progresses
 6. **Escalate** blockers to the user
+
+---
+
+## Branch Model
+
+### Hierarchical Branches
+
+Use a parent branch with agent sub-branches:
+
+```
+main
+  └── {task-name} (parent branch - you create this)
+        ├── {task-name}/blue (agent branch)
+        ├── {task-name}/yellow (agent branch)
+        └── {task-name}/green (agent branch)
+```
+
+**Benefits:**
+- Each agent owns their CI (PRs to parent run CI independently)
+- Agents don't block each other
+- Single final PR to main for external review (if required)
+- Clean merge history
+
+### Setup Parent Branch
+
+At task start:
+```bash
+git fetch origin
+git checkout -b {task-name} origin/main
+git push -u origin {task-name}
+```
+
+### Agent PRs Target Parent
+
+Agents create PRs targeting the parent branch, NOT main:
+```bash
+gh pr create --base {task-name} --title "[agent] Description"
+```
 
 ---
 
@@ -38,7 +76,7 @@ tf-status                # Dashboard view
 ### 3. Check Open PRs
 
 ```bash
-gh pr list               # See open PRs
+gh pr list --base {task-name}    # Agent PRs to parent
 ```
 
 ---
@@ -52,11 +90,13 @@ Create orders files for each agent:
 ~/.taskforce/{task-name}/orders-{agent-name}.md
 ```
 
+**Orders files contain detailed instructions.** Chat is for coordination only.
+
 Structure:
 ```markdown
 # Orders for {Agent}
 
-**From:** Red (Team Lead)
+**From:** Red (Coordinator)
 **Date:** YYYY-MM-DD
 **Phase:** X - Description
 
@@ -64,8 +104,9 @@ Structure:
 
 ## Task: Clear Title
 
-### Starting Point
-git checkout main && git pull && git checkout -b {branch}
+### Branch Setup
+git fetch origin
+git checkout -b {task-name}/{your-name} origin/{task-name}
 
 ### Your Deliverables
 1. First deliverable
@@ -81,16 +122,28 @@ git checkout main && git pull && git checkout -b {branch}
 ### Success Criteria
 1. What "done" looks like
 
+### PR Instructions
+- Target branch: {task-name} (NOT main)
+- Title format: "[{your-name}] Description"
+
 ---
 
 **Status:** Awaiting acknowledgment
 ```
 
-### Directing Agents
+### Directing Agents via Chat
 
-Post orders via chat:
+Use chat for coordination, not detailed instructions:
+
 ```bash
-tf-chat add -T DECISION -m "@green: Your orders are ready at orders-green.md. Start immediately."
+# Point agent to their orders
+tf-chat add -T DECISION -m "@green: Orders ready at orders-green.md. Start Phase 1."
+
+# Validate progress
+tf-chat add -T PROGRESS -m "@green: Phase 1 looks good. Continue to Phase 2."
+
+# Handle handoffs
+tf-chat add -T DECISION -m "@blue: Green's PR merged. You're unblocked for Phase 2."
 ```
 
 ---
@@ -104,35 +157,37 @@ tf-chat add -T DECISION -m "@green: Your orders are ready at orders-green.md. St
 - Build succeeds
 - Tests pass
 
-You should NOT be debugging their CI failures - that's their job.
+**You do NOT debug their CI failures** - that's their job.
 
 ### When Agent Reports DONE
 
-Agent says: "PR #X ready - CI all green ✓"
+Agent says: "PR #X ready - CI all green"
 
 You:
-1. Verify PR is mergeable: `gh pr view <number> --json state,mergeable`
+1. **Verify CI passed:** `gh pr checks <number>`
 2. Quick sanity check of changes (optional)
-3. Merge: `gh pr merge <number> --squash --delete-branch`
-4. Announce: `tf-chat add -T FINDING -m "PR #X merged! @agent you're unblocked for next task"`
+3. **Merge to parent:** `gh pr merge <number> --squash --delete-branch`
+4. Announce: `tf-chat add -T PROGRESS -m "PR #X merged! @next-agent you're unblocked."`
 
 ### If Agent Reports DONE But CI Failing
 
 Direct them to fix it:
 ```bash
-tf-chat add -T ANSWER -m "@agent: CI is failing. Please fix and report DONE when green."
+tf-chat add -T ANSWER -m "@agent: CI is failing. Fix and report DONE when green."
 ```
 
-### CI Runner Delays (Free Tier)
+**Do NOT fix their CI yourself.**
 
-GitHub free runners can take **up to 30 minutes** to start. This is normal.
+### Final PR to Main
 
-If CI is queued a very long time:
+When all agent work is merged to parent:
+
 ```bash
-gh run rerun <run-id>    # Retry the run
+# Create PR from parent to main
+gh pr create --base main --head {task-name} --title "[{task-id}] Feature description"
 ```
 
-Only escalate to user if it's been 30+ minutes with no progress.
+**Note:** Not all projects require external approval. Check with user.
 
 ---
 
@@ -140,28 +195,22 @@ Only escalate to user if it's been 30+ minutes with no progress.
 
 ### Gate Phases Properly
 
-Don't start Phase N+1 until Phase N PRs are **merged**.
+Don't start Phase N+1 until Phase N PRs are **merged to parent**.
 
 Example flow:
-1. Phase 4a: Infrastructure (Green, Pink)
-2. Wait for both PRs to merge
-3. Phase 4b: Implementation (Green, Blue, Pink)
-4. Wait for all PRs to merge
-5. Phase 4c: Polish
+1. Phase 1: Blue creates component, PRs to parent
+2. Blue's CI passes, you merge to parent
+3. Phase 2: Yellow can now branch from updated parent
+4. Continue until all phases complete
+5. Final PR from parent to main
 
-### Parallel Agent Limits
+### Parallel Work
 
-**Max 3 agents for code work** (clone-based, needs isolated directory).
-
-**Additional agents OK for non-code work:**
-- Research
-- Documentation
-- Design analysis
-- Planning
-
-So you could have:
-- 3 code agents (green, blue, pink in separate clones)
-- 2 research agents (yellow, orange doing non-code tasks)
+Multiple agents can work simultaneously on different files:
+- Each has their own branch off parent
+- Each has their own PR to parent
+- Each owns their own CI
+- You merge independently as they complete
 
 ---
 
@@ -169,7 +218,10 @@ So you could have:
 
 ### Agent CI Failures
 
-**Not your problem.** Agent owns their CI. Direct them to fix it.
+**Not your problem.** Direct them to fix it:
+```bash
+tf-chat add -T ANSWER -m "@agent: CI failing. Check logs and fix. Report DONE when green."
+```
 
 ### Agent Silent
 
@@ -177,12 +229,12 @@ If agent goes silent 10+ minutes:
 
 1. Ask in chat:
 ```bash
-tf-chat add -T QUESTION -m "@agent: Status check - are you still working on X?"
+tf-chat add -T QUESTION -m "@agent: Status check - are you still working?"
 ```
 
 2. **Also notify user:**
 ```bash
-tf-chat add -T ESCALATE -m "Concerned about @agent - no response for {X} minutes. @user please check."
+tf-chat add -T ESCALATE -m "@user: @agent silent for {X} minutes. Please check."
 ```
 
 ### Conflicting Work
@@ -190,20 +242,27 @@ tf-chat add -T ESCALATE -m "Concerned about @agent - no response for {X} minutes
 If agents accidentally modify same files:
 1. Stop both agents
 2. Decide who owns what
-3. Have one agent rebase
+3. Have one agent rebase from parent
 
 ---
 
 ## Communication Patterns
 
+### Orders vs Chat
+
+| Medium | Use For |
+|--------|---------|
+| `orders-{agent}.md` | Detailed task instructions, file lists, constraints |
+| `tf-chat` | Coordination: "start", "done", "validated", "continue", handoffs |
+
 ### Acknowledge Agent Completion
 
 When agent reports DONE with green CI:
 ```bash
-tf-chat add -T PROGRESS -m "@agent: PR received. Reviewing and merging."
+tf-chat add -T PROGRESS -m "@agent: PR received. Merging now."
 ```
 
-Then merge and announce.
+Then merge and announce to unblocked agents.
 
 ### Answer Questions Quickly
 
@@ -212,21 +271,15 @@ Agents wait on you. Don't leave them hanging:
 tf-chat add -T ANSWER -m "@agent: Answer to your question..."
 ```
 
-### Post Decisions Clearly
-
-Use @mentions so agents know who's affected:
-```bash
-tf-chat add -T DECISION -m "@green @blue: Phase 4b starting. Check your orders files."
-```
-
 ---
 
 ## Waiting Protocol
 
 When waiting for agent work:
 ```bash
-tf-wait -u              # Wait for any messages (polls every 5s, max 10 min)
-tf-wait -u green        # Wait for specific agent
+tf-wait -u              # Wait for any messages (max 10 min)
+tf-wait -u blue         # Wait for specific agent
+tf-wait -u --max 300    # Wait max 5 min
 ```
 
 ---
@@ -236,10 +289,11 @@ tf-wait -u green        # Wait for specific agent
 ### Keep Brief Current
 
 Update your brief (`red-brief.md`) with:
-- Merged PRs
+- Merged PRs (to parent)
 - Current phase
 - Agent assignments
 - Blockers
+- Final PR status
 
 ### Update TASK.md
 
@@ -251,11 +305,10 @@ Check off completed work in the master task doc.
 
 - **Don't implement code** - that's what agents are for
 - **Don't debug agent CI** - they own it, direct them to fix
+- **Don't merge failing CI** - wait for green
 - **Don't start new phase** before current phase merges
 - **Don't ignore agent questions** - they're blocked on you
-- **Don't forget to merge** - agents can't continue until you do
-- **Don't forget to notify user** about silent agents
-- **Don't overwhelm with code agents** - 3 max (more OK for non-code)
+- **Don't put detailed orders in chat** - use orders files
 - **Don't skip updating your brief** - you'll forget context
 
 ---
@@ -263,21 +316,28 @@ Check off completed work in the master task doc.
 ## Quick Reference
 
 ```bash
+# Setup parent branch
+git checkout -b {task-name} origin/main && git push -u origin {task-name}
+
 # Check messages
 tf-chat unread
 
-# Post update
-tf-chat add -T <TYPE> -m "message"
+# Direct agent to orders
+tf-chat add -T DECISION -m "@agent: Orders at orders-{agent}.md. Start now."
 
-# Wait for messages
-tf-wait -u
-
-# Check PR (agent should have passed CI already)
+# Check agent PR
 gh pr view <num> --json state,mergeable
+gh pr checks <num>
 
-# Merge PR
+# Merge agent PR to parent (only when CI green!)
 gh pr merge <num> --squash --delete-branch
 
-# Rerun stuck CI (rare - agent usually handles)
-gh run rerun <run-id>
+# Announce unblock
+tf-chat add -T PROGRESS -m "PR merged! @next-agent you're unblocked."
+
+# Final PR to main
+gh pr create --base main --head {task-name} --title "[task-id] Description"
+
+# Wait for messages
+tf-sleep -u
 ```
