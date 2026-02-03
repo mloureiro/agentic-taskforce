@@ -283,13 +283,16 @@ poll_for_messages() {
             return 1
         fi
 
+        # Strip ANSI escape codes for reliable matching
+        local plain_output
+        plain_output=$(echo "$status_output" | sed 's/\x1b\[[0-9;]*m//g')
+
         # Check if there are unread messages
-        if echo "$status_output" | grep -qE "[0-9]+ unread message"; then
+        if echo "$plain_output" | grep -qE "[0-9]+ unread message"; then
             # If filtering by user, check if any messages are from that user
             if [[ -n "$from_user" ]]; then
-                # Look for lines like "[timestamp] [user] TYPE" or "[timestamp] [you] TYPE"
-                # The user filter should match the agent name in brackets
-                if echo "$status_output" | grep -qE "\[${from_user}\]"; then
+                # Look for lines like "[timestamp] [user] TYPE"
+                if echo "$plain_output" | grep -qE "\[${from_user}\]"; then
                     echo -e "${GREEN}[tf-wait]${NC} Messages from ${BOLD}$from_user${NC} found!"
                     echo "$status_output"
                     return 0
