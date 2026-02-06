@@ -112,6 +112,17 @@ Don't report DONE until:
 - Tests pass
 - Build succeeds
 
+### Verifying Your Tests Passed
+
+Don't rely on job names alone — verify YOUR test files are not in the failures:
+
+1. Find the CI job that ran your tests: `cci pipeline-jobs <pipeline-id> --status failed`
+2. Check for failures from your files: `cci tests <job-number>`
+3. If "No failed tests" and the job passed, you're good
+4. If the job failed but your files aren't in the failures, it's pre-existing — mention this in your submission
+
+**Never claim CI is green based on a different job than the one running your tests.**
+
 ### If Your Changes Break CI
 
 **You fix them.** Don't expect the coordinator to debug your CI.

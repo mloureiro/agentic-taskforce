@@ -228,11 +228,24 @@ Multiple agents can work simultaneously on different files:
 
 ## Handling Blockers
 
-### Agent CI Failures
+### Agent CI Failures — Triage Only
 
-**Not your problem.** Direct them to fix it:
+**Triage quickly:** Distinguish pre-existing failures from agent failures using `cci tests <job-number>`. This is a 1-command check.
+
+**Do NOT:** Read full CI logs, review the agent's code changes, or debug their test logic. That burns coordinator context — which is your scarcest resource.
+
+**If it's pre-existing:** Tell the agent to ignore it and re-submit.
+**If it's the agent's fault:** Tell them which test failed and send them back to fix it. Let THEM investigate root causes.
+
 ```bash
-tf-chat add -T ANSWER -m "@agent: CI failing. Check logs and fix. Report DONE when green."
+# Quick triage
+cci tests <job-number>
+
+# Pre-existing failure
+tf-chat add -T ANSWER -m "@agent: CI failure is pre-existing (not your tests). Re-submit."
+
+# Agent's failure
+tf-chat add -T ANSWER -m "@agent: Your test X is failing. Fix and re-submit when green."
 ```
 
 ### Agent Silent
@@ -310,6 +323,32 @@ Update your brief (`red-brief.md`) with:
 ### Update TASK.md
 
 Check off completed work in the master task doc.
+
+---
+
+## Knowledge Sharing
+
+### Maintain a Learnings File
+
+When agents discover gotchas or patterns during their work, record them:
+
+```
+~/.taskforce/{task-name}/learnings.md
+```
+
+Update this file whenever:
+- An agent hits an unexpected issue and you identify the root cause
+- A pattern emerges that future agents will encounter
+- A workaround is needed for a known issue
+
+**Reference the learnings file in orders** for later waves:
+
+```markdown
+### Known Gotchas
+Read `learnings.md` before starting — it has solutions to issues earlier agents hit.
+```
+
+This prevents the same bug from failing CI across multiple waves.
 
 ---
 
